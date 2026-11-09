@@ -10,6 +10,7 @@ except Exception:
 
 import os
 import shutil
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -72,6 +73,22 @@ def check_native_deps() -> List[Tuple[str, bool, str]]:
     return results
 
 
+def check_bridge_port(host: str = "127.0.0.1", port: int = 8787) -> Tuple[bool, str]:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.5)
+        is_used = s.connect_ex((host, port)) == 0
+    if is_used:
+        if httpx:
+            try:
+                r = httpx.get(f"http://{host}:{port}/healthz", timeout=1.0)
+                if r.status_code == 200:
+                    return True, f"Port {port} AKTIF melayani DeepSeek Bridge (Daemon Running)"
+            except Exception:
+                pass
+        return False, f"Port {port} SEDANG DIGUNAKAN oleh proses lain (Tutup proses tersebut atau ubah DSB_PORT)"
+    return True, f"Port {port} TERSEDIA (Siap digunakan)"
+
+
 def check_9router(base_url: str = "http://localhost:20128") -> Tuple[bool, str, Dict[str, Any]]:
     if not httpx:
         return False, "httpx library tidak terpasang", {}
@@ -107,8 +124,11 @@ def run_full_diagnostics() -> None:
 
     deps = check_native_deps()
     for i, (name, ok, msg) in enumerate(deps):
-        char = "└─" if i == len(deps) - 1 else "├─"
-        print(f"    {char} {'[OK]' if ok else '[FAIL]'} {name:<30} : {msg}")
+        print(f"    ├─ {'[OK]' if ok else '[FAIL]'} {name:<30} : {msg}")
+
+    # Port Check
+    port_ok, port_msg = check_bridge_port()
+    print(f"    └─ {'[OK]' if port_ok else '[WARN]'} {port_msg}")
 
     # 2. 9router Gateway
     print("\n[2] 9ROUTER GATEWAY STATUS:")
