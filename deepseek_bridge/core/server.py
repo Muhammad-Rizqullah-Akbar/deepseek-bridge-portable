@@ -1613,10 +1613,11 @@ def _profile_from_request(request: "Request", body: dict) -> str:
     # baca active_profile Hermes agar profil tidak pernah jatuh ke AI tanpa identitas.
     try:
         from pathlib import Path
-        p = Path(r"C:\Users\PC\AppData\Local\hermes\active_profile")
+        from ..hermes.discovery import get_hermes_root
+        p = get_hermes_root() / "active_profile"
         if p.exists():
             val = _tm.normalize_profile(p.read_text(encoding="utf-8").strip())
-            if val and val != "default" and val in PROFILES:
+            if val and val != "default":
                 return val
     except Exception:
         pass
