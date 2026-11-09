@@ -3,7 +3,7 @@
 # ⚡ DEEPSEEK BRIDGE PORTABLE
 ### *Enterprise-Grade, Zero-Token-Cost OpenAI Gateway with Native Hermes Dynamic Introspection*
 
-[![Author: inirizqullahakbar](https://img.shields.io/badge/Author-inirizqullahakbar-00F0FF?style=for-the-badge&logo=github&logoColor=black)](https://github.com/inirizqullahakbar)
+[![Author: inirizqullahakbar](https://img.shields.io/badge/Author-Muhammad--Rizqullah--Akbar-00F0FF?style=for-the-badge&logo=github&logoColor=black)](https://github.com/Muhammad-Rizqullah-Akbar)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.0.0-68a063?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
 [![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
@@ -115,7 +115,7 @@ Bridge dilengkapi auditor bawaan yang memeriksa kesiapan sistem operasi sebelum 
 
 ### 1. Inisialisasi Otomatis (1-Click)
 ```bash
-git clone https://github.com/inirizqullahakbar/deepseek-bridge-portable.git
+git clone https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable.git
 cd deepseek-bridge-portable
 
 # Di Windows:
@@ -184,8 +184,8 @@ Agar ekosistem ini tetap sehat dan dapat dinikmati bersama, kami menyerukan prin
 Proyek ini dibangun secara independen dan **terbuka lebar untuk kolaborasi pengembang global**. Jika Anda menemukan celah perbaikan, bug hulu, atau ingin menambahkan kapabilitas baru:
 
 ### Saluran Komunikasi & Kolaborasi:
-- 💡 **Diskusi Ide & Arsitektur:** Buka [GitHub Discussions](https://github.com/inirizqullahakbar/deepseek-bridge-portable/discussions).
-- 🐛 **Pelaporan Masalah / Bug:** Buka [GitHub Issues](https://github.com/inirizqullahakbar/deepseek-bridge-portable/issues) menggunakan formulir terstruktur kami.
+- 💡 **Diskusi Ide & Arsitektur:** Buka [GitHub Discussions](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/discussions).
+- 🐛 **Pelaporan Masalah / Bug:** Buka [GitHub Issues](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/issues) menggunakan formulir terstruktur kami.
 - 📬 **Kontak Author:** Hubungi via email di **`inirizqullahakbar@gmail.com`**.
 - 🛠️ **Panduan Kontribusi:** Baca [CONTRIBUTING.md](CONTRIBUTING.md) untuk pedoman branching dan pengujian PR.
 

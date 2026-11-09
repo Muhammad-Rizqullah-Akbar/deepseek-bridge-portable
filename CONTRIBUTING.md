@@ -9,7 +9,7 @@ Kami menyambut kontribusi dari developer, reverse engineer, hacker, dan AI pract
 ## 🛠️ Cara Mulai Berkontribusi
 
 1. **Fork Repositori:**
-   Klik tombol `Fork` di pojok kanan atas repositori [GitHub inirizqullahakbar/deepseek-bridge-portable](https://github.com/inirizqullahakbar/deepseek-bridge-portable).
+   Klik tombol `Fork` di pojok kanan atas repositori [GitHub inirizqullahakbar/deepseek-bridge-portable](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable).
 2. **Kloning ke Lokal:**
    ```bash
    git clone https://github.com/<username-anda>/deepseek-bridge-portable.git
@@ -52,8 +52,8 @@ Kami sangat mengapresiasi kontribusi pada area berikut:
 ## 💬 Hubungi & Berdiskusi
 
 Punya ide arsitektur, menemukan kendala teknis, atau ingin berkolaborasi?
-* **GitHub Issues:** Gunakan [Issue Tracker](https://github.com/inirizqullahakbar/deepseek-bridge-portable/issues) untuk melaporkan bug atau meminta fitur baru.
-* **GitHub Discussions:** Ruang terbuka untuk tanya jawab, showcase implementasi, dan ide pengembangan masa depan di [GitHub Discussions](https://github.com/inirizqullahakbar/deepseek-bridge-portable/discussions).
+* **GitHub Issues:** Gunakan [Issue Tracker](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/issues) untuk melaporkan bug atau meminta fitur baru.
+* **GitHub Discussions:** Ruang terbuka untuk tanya jawab, showcase implementasi, dan ide pengembangan masa depan di [GitHub Discussions](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/discussions).
 * **Email Langsung:** Hubungi maintainer di **`inirizqullahakbar@gmail.com`**.
 
 ---

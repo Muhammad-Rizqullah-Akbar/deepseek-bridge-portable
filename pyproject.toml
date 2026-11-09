@@ -8,8 +8,8 @@ version = "2.5.0"
 description = "Enterprise-Grade, Zero-Token-Cost OpenAI-Compatible Gateway for DeepSeek V3/R1 & Dynamic Hermes Native Integration"
 readme = "README.md"
 license = { text = "MIT" }
-authors = [{ name = "inirizqullahakbar", email = "inirizqullahakbar@gmail.com" }]
-maintainers = [{ name = "inirizqullahakbar", email = "inirizqullahakbar@gmail.com" }]
+authors = [{ name = "Muhammad-Rizqullah-Akbar", email = "inirizqullahakbar@gmail.com" }]
+maintainers = [{ name = "Muhammad-Rizqullah-Akbar", email = "inirizqullahakbar@gmail.com" }]
 requires-python = ">=3.10"
 keywords = ["deepseek", "hermes-agent", "llm-gateway", "openai-compatible", "agentic-ai", "reverse-engineering", "zero-token-cost"]
 classifiers = [
@@ -37,11 +37,11 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/inirizqullahakbar/deepseek-bridge-portable"
-Documentation = "https://github.com/inirizqullahakbar/deepseek-bridge-portable#readme"
-Repository = "https://github.com/inirizqullahakbar/deepseek-bridge-portable.git"
-Issues = "https://github.com/inirizqullahakbar/deepseek-bridge-portable/issues"
-Discussions = "https://github.com/inirizqullahakbar/deepseek-bridge-portable/discussions"
+Homepage = "https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable"
+Documentation = "https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable#readme"
+Repository = "https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable.git"
+Issues = "https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/issues"
+Discussions = "https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/discussions"
 
 [project.scripts]
 deepseek-bridge = "deepseek_bridge.__main__:main"
