@@ -44,6 +44,12 @@ if not defined PYTHON_CMD (
 echo [*] Interpreter sistem terdeteksi: !PYTHON_CMD!
 
 :: 2. Setup Isolated Virtual Environment (.venv)
+if exist ".venv" (
+    if not exist ".venv\Scripts\python.exe" (
+        echo [*] Direktori .venv sebelumnya tidak lengkap atau korup, membersihkan...
+        rmdir /s /q ".venv"
+    )
+)
 if not exist ".venv\Scripts\python.exe" (
     echo [*] Membuat isolated virtual environment (.venv)...
     !PYTHON_CMD! -m venv .venv

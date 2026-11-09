@@ -16,14 +16,15 @@ dist/
 .env
 .venv/
 venv/
+ENV/
 
-# Project Runtime Data (Clean Slate)
-data/session/acc*
+# Project Runtime Data & Sessions (Clean Slate Guarantee)
+data/session/*/
 data/session/*.json
 !data/session/accounts.example.json
-data/state/*.db
-data/state/*.db-*
-data/state/*.log
+data/state/*
+!data/state/.gitkeep
+session/
 threads.db
 threads.db-*
 *.log

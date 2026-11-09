@@ -121,6 +121,15 @@ def cmd_serve(args) -> int:
 
     host = "127.0.0.1" if config.HOST in ("127.0.0.1", "localhost") else "0.0.0.0"
 
+    from .cli.diagnostics import check_bridge_port
+    is_avail, port_msg = check_bridge_port(host, config.PORT)
+    if not is_avail:
+        print(f"\n[!] PERINGATAN: {port_msg}")
+        print(f"[*] Gateway kemungkinan sudah aktif di latar belakang.")
+        print(f"[*] Dashboard Web dapat langsung diakses di: http://127.0.0.1:{config.PORT}/")
+        print(f"[*] Untuk menjalankan di port lain, atur environment variable: DSB_PORT=<port>\n")
+        return 0
+
     uvicorn.run(
         "deepseek_bridge.core.server:app",
         host=host,

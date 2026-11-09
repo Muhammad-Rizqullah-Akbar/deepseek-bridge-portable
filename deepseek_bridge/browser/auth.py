@@ -42,6 +42,66 @@ LAUNCH_ARGS = [
 ]
 IGNORE_DEFAULT_ARGS = ["--enable-automation"]
 
+# Injeksi stealth script untuk menetralkan deteksi bot pada Cloudflare Turnstile & AWS WAF
+_STEALTH_INIT_SCRIPT = """
+(() => {
+  try {
+    // 1. Sembunyikan navigator.webdriver
+    Object.defineProperty(navigator, 'webdriver', {
+      get: () => undefined
+    });
+
+    // 2. Mock window.chrome runtime object
+    if (!window.chrome) {
+      window.chrome = {
+        app: { isInstalled: false, InstallState: { DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed' }, RunningState: { CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running' } },
+        runtime: { OnInstalledReason: {}, OnRestartRequiredReason: {}, PlatformArch: {}, PlatformNaclArch: {}, PlatformOs: {}, RequestUpdateCheckStatus: {} },
+        loadTimes: function() {},
+        csi: function() {}
+      };
+    }
+
+    // 3. Mock plugins (menyerupai browser fisik pengguna)
+    if (!navigator.plugins || navigator.plugins.length === 0) {
+      const mockPlugins = [
+        { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+        { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+        { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' }
+      ];
+      Object.defineProperty(navigator, 'plugins', {
+        get: () => mockPlugins
+      });
+    }
+
+    // 4. Mock navigator.languages
+    if (!navigator.languages || navigator.languages.length === 0) {
+      Object.defineProperty(navigator, 'languages', {
+        get: () => ['en-US', 'en', 'id']
+      });
+    }
+  } catch(e) {}
+})()
+"""
+
+_INJECT_SUCCESS_BANNER_JS = """
+(() => {
+  try {
+    if (document.getElementById('deepseek-bridge-success-banner')) return;
+    const b = document.createElement('div');
+    b.id = 'deepseek-bridge-success-banner';
+    b.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999999;' +
+        'background:linear-gradient(135deg,#059669,#10b981);color:#ffffff;padding:14px 28px;' +
+        'border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;' +
+        'font-size:15px;font-weight:600;box-shadow:0 10px 25px rgba(0,0,0,0.35);border:1px solid #34d399;' +
+        'display:flex;align-items:center;gap:12px;';
+    b.innerHTML = '<span style="font-size:22px;">&#10003;</span> ' +
+        '<span>[DeepSeek Bridge] Sesi Berhasil Terhubung &amp; Tersimpan! Jendela ini tetap aktif untuk verifikasi Anda. ' +
+        'Tutup jendela ini jika sudah selesai.</span>';
+    document.body.appendChild(b);
+  } catch(e) {}
+})()
+"""
+
 
 def _ensure_interactive_desktop() -> None:
     """Pastikan thread dan proses terikat ke desktop interaktif pengguna (WinSta0\\Default)."""
@@ -145,14 +205,9 @@ class Session:
     cookies: Dict[str, str]
     user_agent: str
     captured_at: float
-    # Device id yang dikirim website di header x-device-id. Opsional supaya
-    # berkas sesi lama tetap bisa dimuat tanpa diubah. Kalau kosong, klien
-    # memakai nilai turunan yang stabil per sesi, bukan UUID acak tiap request,
-    # karena device id yang berubah tiap request justru lebih mudah dikenali
-    # daripada device id yang tidak dikirim.
+    # Device id yang dikirim website di header x-device-id.
     device_id: str = ""
-    # Zona waktu klien dalam detik, dikirim website di
-    # x-client-timezone-offset. Diisi dari mesin lokal kalau tidak ada.
+    # Zona waktu klien dalam detik, dikirim website di x-client-timezone-offset.
     timezone_offset: int = 0
 
     @property
@@ -189,7 +244,7 @@ _READ_TOKEN_JS = """
     try {
       const o = JSON.parse(raw);
       token = (o && o.value) ? o.value : (typeof o === 'string' ? o : null);
-    } catch (e) {
+    } catch {
       token = raw;
     }
     if (typeof token === 'string' && token.trim().startsWith('ey') && token.trim().length > 20) {
@@ -197,25 +252,6 @@ _READ_TOKEN_JS = """
     }
     return null;
   } catch (e) { return null; }
-}
-"""
-
-_INJECT_SUCCESS_BANNER_JS = """
-() => {
-  try {
-    if (document.getElementById('deepseek-bridge-success-banner')) return;
-    const b = document.createElement('div');
-    b.id = 'deepseek-bridge-success-banner';
-    b.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999999;' +
-        'background:linear-gradient(135deg,#059669,#10b981);color:#ffffff;padding:14px 28px;' +
-        'border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;' +
-        'font-size:15px;font-weight:600;box-shadow:0 10px 25px rgba(0,0,0,0.35);border:1px solid #34d399;' +
-        'display:flex;align-items:center;gap:12px;';
-    b.innerHTML = '<span style="font-size:22px;">&#10003;</span> ' +
-        '<span>[DeepSeek Bridge] Sesi Berhasil Terhubung &amp; Tersimpan! Jendela ini tetap aktif untuk verifikasi Anda. ' +
-        'Tutup jendela ini jika sudah selesai.</span>';
-    document.body.appendChild(b);
-  } catch(e) {}
 }
 """
 
@@ -244,9 +280,10 @@ def _launch(p, headless: bool, profile_dir: Optional[Path] = None):
     profile_dir.mkdir(parents=True, exist_ok=True)
     _clean_stale_profile_locks(profile_dir)
 
+    ctx = None
     # 1. Coba Google Chrome
     try:
-        return p.chromium.launch_persistent_context(
+        ctx = p.chromium.launch_persistent_context(
             str(profile_dir),
             headless=headless,
             channel="chrome",
@@ -259,26 +296,36 @@ def _launch(p, headless: bool, profile_dir: Optional[Path] = None):
             raise
 
     # 2. Coba Microsoft Edge
-    try:
-        return p.chromium.launch_persistent_context(
+    if ctx is None:
+        try:
+            ctx = p.chromium.launch_persistent_context(
+                str(profile_dir),
+                headless=headless,
+                channel="msedge",
+                args=LAUNCH_ARGS,
+                ignore_default_args=IGNORE_DEFAULT_ARGS,
+            )
+        except Exception as e:
+            msg = str(e).lower()
+            if "lock" in msg or "singleton" in msg or "profile in use" in msg:
+                raise
+
+    # 3. Fallback ke bundled Chromium Playwright
+    if ctx is None:
+        ctx = p.chromium.launch_persistent_context(
             str(profile_dir),
             headless=headless,
-            channel="msedge",
             args=LAUNCH_ARGS,
             ignore_default_args=IGNORE_DEFAULT_ARGS,
         )
-    except Exception as e:
-        msg = str(e).lower()
-        if "lock" in msg or "singleton" in msg or "profile in use" in msg:
-            raise
 
-    # 3. Fallback ke bundled Chromium Playwright
-    return p.chromium.launch_persistent_context(
-        str(profile_dir),
-        headless=headless,
-        args=LAUNCH_ARGS,
-        ignore_default_args=IGNORE_DEFAULT_ARGS,
-    )
+    # Injeksi stealth script anti-deteksi bot
+    try:
+        ctx.add_init_script(_STEALTH_INIT_SCRIPT)
+    except Exception:
+        pass
+
+    return ctx
 
 
 def _capture_from_context(context, page) -> Optional[Session]:
@@ -309,42 +356,54 @@ def _capture_from_context(context, page) -> Optional[Session]:
             "() => window.localStorage.getItem('deviceId') || window.localStorage.getItem('device_id') || ''"
         ) or ""
 
+        tz_offset = _safe_evaluate(page, "() => new Date().getTimezoneOffset() * -60")
+        tz_int = int(tz_offset) if tz_offset is not None else 0
+
         return Session(
             token=token,
             cookies=deepseek_cookies,
             user_agent=ua,
             captured_at=time.time(),
             device_id=dev_id,
+            timezone_offset=tz_int,
         )
     except Exception:
         return None
 
 
-def _wait_for_token(page, timeout: float, context=None) -> Tuple[Optional[str], Optional[any]]:
-    """Poll localStorage.userToken HANYA dari tab DeepSeek sampai muncul atau timeout.
+def _wait_for_token(context, timeout: float) -> Tuple[Optional[str], Optional[any]]:
+    """Poll localStorage.userToken HANYA dari tab DeepSeek sampai login selesai atau timeout.
 
-    Tab lain (seperti tab Proton Mail untuk melihat OTP) dibiarkan aktif tanpa intervensi.
-    Jeda polling diatur halus (2.0s) guna mencegah deteksi bot / burst request.
+    Terlepas dari tab handle spesifik (decoupled) agar jika pengguna menutup tab pertama
+    atau berganti tab antara Proton Mail dan DeepSeek, loop tetap berjalan stabil.
     """
     deadline = time.time() + timeout
     closed = False
     while time.time() < deadline:
-        pages = context.pages if (context and context.pages) else [page]
+        try:
+            pages = context.pages if context else []
+            if not pages:
+                closed = True
+                break
+        except Exception:
+            closed = True
+            break
+
         for p in pages:
             if not is_deepseek_tab(p):
                 continue
+
+            curr_url = (p.url or "").lower()
+            # Jika masih di sign_in, pengguna belum submit OTP / login
+            if "/sign_in" in curr_url or "/login" in curr_url:
+                continue
+
             token = _safe_evaluate(p, _READ_TOKEN_JS)
             if token:
                 return token, p
-        try:
-            page.wait_for_timeout(2000)
-        except Exception as e:
-            msg = str(e)
-            if "Target page, context or browser has been closed" in msg \
-                    or "TargetClosed" in type(e).__name__:
-                closed = True
-                break
-            raise
+
+        time.sleep(2.0)
+
     if closed:
         log.info("Window browser ditutup sebelum login selesai.")
     return None, None
@@ -390,9 +449,10 @@ def login(headless: bool = False, assume_logged_out: bool = False,
         target_page = page
         session = None
 
-        # Cek apakah sesi sudah ada dari profil persisten
+        # Cek apakah sesi sudah valid dari profil persisten (bukan di sign_in)
         for p_page in context.pages:
-            if is_deepseek_tab(p_page):
+            curr_url = (p_page.url or "").lower()
+            if is_deepseek_tab(p_page) and "/sign_in" not in curr_url:
                 s = _capture_from_context(context, p_page)
                 if s and s.token:
                     session = s
@@ -414,7 +474,7 @@ def login(headless: bool = False, assume_logged_out: bool = False,
             print(f"[*] Menunggu autentikasi selesai (hingga {timeout:.0f} detik)...")
             print("=" * 76)
 
-            token, active_page = _wait_for_token(page, timeout=timeout, context=context)
+            token, active_page = _wait_for_token(context, timeout=timeout)
             if not token:
                 try:
                     context.close()
@@ -425,13 +485,20 @@ def login(headless: bool = False, assume_logged_out: bool = False,
                 )
             target_page = active_page or page
 
-            for p_page in context.pages:
-                if is_deepseek_tab(p_page):
-                    s = _capture_from_context(context, p_page)
-                    if s and s.token:
-                        session = s
-                        target_page = p_page
-                        break
+            # Beri jeda 2 detik agar background request WAF / Cloudflare selesai menulis cookie
+            time.sleep(2.0)
+
+            for _ in range(4):
+                for p_page in context.pages:
+                    if is_deepseek_tab(p_page):
+                        s = _capture_from_context(context, p_page)
+                        if s and s.token:
+                            session = s
+                            target_page = p_page
+                            break
+                if session and any("waf" in k.lower() or "session" in k.lower() for k in session.cookies.keys()):
+                    break
+                time.sleep(1.0)
 
         if session is None or not session.token:
             try:
