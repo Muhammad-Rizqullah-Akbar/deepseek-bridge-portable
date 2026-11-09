@@ -130,7 +130,7 @@ class ChatCompletionRequest(BaseModel):
         """Apakah alur penalaran (thinking) harus dialirkan langsung ke delta.content dengan tag <think>."""
         if self.thinking_inline is not None:
             return bool(self.thinking_inline)
-        from .. import config
+        from . import config
         return getattr(config, "THINKING_INLINE", True)
 
 

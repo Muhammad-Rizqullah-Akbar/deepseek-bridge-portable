@@ -1117,9 +1117,9 @@ async def admin_account_add(request: Request):
     # langsung terlihat sebagai profil yang siap dipakai di dashboard.
     created = []
     try:
-        Path(acc.session_file).parent.mkdir(parents=True, exist_ok=True)
-        Path(acc.profile_dir).mkdir(parents=True, exist_ok=True)
-        created = [str(Path(acc.profile_dir)), str(Path(acc.session_file).parent)]
+        acc.session.parent.mkdir(parents=True, exist_ok=True)
+        acc.profile.mkdir(parents=True, exist_ok=True)
+        created = [str(acc.profile), str(acc.session.parent)]
     except OSError as e:
         # Akun sudah terdaftar; kegagalan membuat direktori dilaporkan
         # sebagai peringatan, bukan kegagalan penuh, karena Chromium tetap
@@ -1134,7 +1134,7 @@ async def admin_account_add(request: Request):
         "account": acc.name,
         "email": acc.email,
         "profile_dir": acc.profile_dir,
-        "profile_ready": Path(acc.profile_dir).exists(),
+        "profile_ready": acc.profile.exists(),
         "session_file": acc.session_file,
         "created": created,
     }
@@ -1220,6 +1220,10 @@ def _run_profile_window(name: str, profile_dir: Path, holder: dict) -> None:
         log.info("profil %s: browser dibuka via browse.py (PID %s)", name, proc.pid)
         while not holder.get("stop") and proc.poll() is None:
             time.sleep(1.0)
+        ret = proc.poll()
+        if ret is not None and ret != 0:
+            log.warning("profil %s: browse.py berhenti dengan kode exit %s", name, ret)
+            holder["error"] = f"Browser proses keluar dengan kode {ret}"
         if holder.get("stop") and proc.poll() is None:
             log.info("profil %s: sinyal stop dikirim ke browse.py", name)
             try:

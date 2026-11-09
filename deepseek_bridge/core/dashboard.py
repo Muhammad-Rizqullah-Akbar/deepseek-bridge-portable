@@ -17,10 +17,10 @@ from typing import Optional
 
 from fastapi.responses import HTMLResponse
 
-from .. import config
-from .. import db as bridge_db
-from ..apikeys import get_store
-from ..pool import AccountPool
+from . import config
+from ..state import db as bridge_db
+from ..state.apikeys import get_store
+from ..state.pool import AccountPool
 
 # Log request terakhir, disimpan di memori. Ukuran dibatasi supaya
 # tidak tumbuh tanpa batas pada server yang jalan lama.
@@ -267,7 +267,7 @@ tr.klik:hover { background: var(--panel2); }
 
   <div class="card">
     <div class="card-head">
-      <h2>Akun &amp; Profil Chromium</h2>
+      <h2>Akun &amp; Profil Browser</h2>
       <span class="note" id="accnote"></span>
     </div>
     <div id="acctable"></div>
@@ -395,7 +395,7 @@ async function relogin(account, btn) {
 async function openProfile(name, btn) {
   const label = btn.textContent;
   btn.disabled = true;
-  btn.textContent = 'Membuka Chrome...';
+  btn.textContent = 'Membuka Browser...';
   try {
     const r = await fetch('/admin/accounts/' + encodeURIComponent(name) + '/open', {method: 'POST'});
     const o = await r.json();
@@ -406,11 +406,22 @@ async function openProfile(name, btn) {
       await load();
       try {
         const check = await (await fetch('/admin/accounts/' + encodeURIComponent(name) + '/open')).json();
-        if (check.open || count >= 5) {
+        if (check.error) {
           clearInterval(pollTimer);
+          alert('Error saat membuka browser: ' + check.error);
+          btn.disabled = false;
+          btn.textContent = label;
+          return;
+        }
+        if (check.open || count >= 8) {
+          clearInterval(pollTimer);
+          btn.disabled = false;
+          btn.textContent = label;
         }
       } catch (err) {
         clearInterval(pollTimer);
+        btn.disabled = false;
+        btn.textContent = label;
       }
     }, 1200);
   } catch (e) {
@@ -436,7 +447,7 @@ async function deleteAccount(name, btn) {
 
 async function closeProfile(name, btn) {
   btn.disabled = true;
-  btn.textContent = 'Menutup Chrome...';
+  btn.textContent = 'Menutup Browser...';
   try {
     await fetch('/admin/accounts/' + encodeURIComponent(name) + '/close', {method: 'POST'});
     let count = 0;
@@ -478,7 +489,7 @@ async function addAccount() {
     });
     const o = await r.json();
     if (!r.ok) { box.innerHTML = `<span class="alert">${esc(o.error || o.detail || 'gagal')}</span>`; return; }
-    box.innerHTML = `<span class="ok">Akun <b>${esc(o.account)}</b> ditambahkan. Profil Chromium ` +
+    box.innerHTML = `<span class="ok">Akun <b>${esc(o.account)}</b> ditambahkan. Profil Browser ` +
       `<code>${esc(o.profile_dir)}</code> ${o.profile_ready ? 'siap dipakai' : 'belum dibuat'}. ` +
       `Klik Buka Browser untuk login pertama, sesudah itu sesi bertahan tanpa relog.</span>`;
     document.getElementById('acc_name').value = '';
@@ -515,7 +526,7 @@ async function checkIsolation() {
 function policyLine(p) {
   if (!p) return '';
   const m = v => Math.round(v / 60);
-  return `<div class="policy">Profil Chromium tiap akun persisten. Token di-refresh otomatis tiap
+  return `<div class="policy">Profil Browser tiap akun persisten. Token di-refresh otomatis tiap
     <b>${m(p.keepalive_interval_seconds)} menit</b> bila sisa umurnya di bawah
     <b>${Math.round(p.refresh_before_expiry_seconds / 3600)} jam</b>. Batas usia token
     <b>${Math.round(p.token_max_age_seconds / 3600)} jam</b>, completion serentak

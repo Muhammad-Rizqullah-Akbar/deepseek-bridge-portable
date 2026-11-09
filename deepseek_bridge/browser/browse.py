@@ -244,7 +244,10 @@ def run_browse(account_name: str) -> int:
         return 1
 
     digits = "".join(c for c in account_name if c.isdigit())
-    cdp_port = 9330 + (int(digits) if digits else 1)
+    if digits:
+        cdp_port = 9330 + int(digits)
+    else:
+        cdp_port = 9330 + (abs(hash(account_name)) % 500) + 1
 
     log.info("Membuka browser visual desktop untuk akun '%s'...", account_name)
     log.info("  Binary : %s", browser_exe)
@@ -282,13 +285,13 @@ def run_browse(account_name: str) -> int:
     with sync_playwright() as p:
         browser = None
         for attempt in range(40):
-            if proc.poll() is not None:
-                log.info("Browser ditutup sebelum pengawas terhubung.")
-                return 0
             try:
                 browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
                 break
             except Exception:
+                if proc.poll() is not None and attempt > 6:
+                    log.info("Browser ditutup sebelum pengawas CDP terhubung.")
+                    return 0
                 time.sleep(0.5)
 
         if not browser:
@@ -303,7 +306,7 @@ def run_browse(account_name: str) -> int:
 
         last_check = 0.0
         try:
-            while proc.poll() is None:
+            while browser.is_connected():
                 if stop_file.exists():
                     log.info("Sinyal stop diterima. Menutup browser...")
                     stop_file.unlink(missing_ok=True)

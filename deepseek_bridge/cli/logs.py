@@ -16,7 +16,7 @@ import sys
 import time
 from typing import Any, List
 
-from .. import db as bridge_db
+from ..state import db as bridge_db
 
 
 def _format_row_cli(r: sqlite3.Row) -> str:

@@ -48,7 +48,7 @@ from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from .. import config
+from ..core import config
 
 KEY_FILE = Path(os.getenv(
     "DSB_KEY_FILE",

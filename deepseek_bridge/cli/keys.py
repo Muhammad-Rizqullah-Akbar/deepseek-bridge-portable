@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from ..apikeys import get_store, ApiKey
+from ..state.apikeys import get_store, ApiKey
 
 
 def cmd_keys(args) -> int:

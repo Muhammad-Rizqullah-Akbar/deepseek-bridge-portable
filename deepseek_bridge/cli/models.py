@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from .. import config
+from ..core import config
 
 
 def _get_models_file() -> Path:
