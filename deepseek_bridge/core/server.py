@@ -43,22 +43,22 @@ from starlette.concurrency import run_in_threadpool
 
 from . import config
 from . import approval_filter
-from . import cache
-from .accounts import Account, AccountError, AccountRegistry
-from .apikeys import ApiKey, get_store
-from .auth import LoginRequired, Session
+from ..state import cache
+from ..state.registry import Account, AccountError, AccountRegistry
+from ..state.apikeys import ApiKey, get_store
+from ..browser.auth import LoginRequired, Session
 from .client import DeepSeekClient, DeepSeekError, DeepSeekChallengeRequired
 from .dashboard import record_request
-from .pool import AccountPool, AccountState
+from ..state.pool import AccountPool, AccountState
 from .ratelimit import RateLimiter
 from .schemas import ChatCompletionRequest, ChatMessage
-from . import db as bridge_db
-from . import threads as thread_mod
-from .tools_emu import (TOOL_CALL_START, build_tool_instructions,
+from ..state import db as bridge_db
+from ..state import threads as thread_mod
+from ..cognitive.tools_emu import (TOOL_CALL_START, build_tool_instructions,
                         build_tool_prompt, parse_tool_calls,
                         tool_names_note, to_tool_calls,
                         validate_tool_calls)
-from .recovery import (MAX_REWRITE_ATTEMPTS, intent_nudge_prompt,
+from ..cognitive.recovery import (MAX_REWRITE_ATTEMPTS, intent_nudge_prompt,
                        is_unfulfilled_tool_intent, missing_fields_report,
                        rewrite_prompt, salvage_from_broken,
                        should_retry, synthetic_error_call)
@@ -1851,7 +1851,7 @@ async def chat_completions(req: ChatCompletionRequest, request: Request):
     slot_profil = [profil]
     _active_profile[0] = profil
     is_antigravity = _is_antigravity_client(request, req.model)
-    from . import resurgence
+    from ..cognitive import resurgence
     resurgence.sanitize_ingress_messages(req.messages, profil)
     try:
         result = await _run_completion(req, api_key, started, profile_slot=slot_profil, is_antigravity=is_antigravity)
@@ -2016,7 +2016,7 @@ def _build_fresh_bootstrap_prompt(req: ChatCompletionRequest, profile: str = "")
         req.tools,
     )
     if config.PROFILE_STAMP_ENABLED and profile:
-        from . import resurgence
+        from ..cognitive import resurgence
         prinsip = resurgence.get_prinsip_prompt(profile)
         identitas = thread_mod.profile_system_prompt(profile)
         if not identitas:
@@ -2143,7 +2143,7 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
         # sangat murah. Kalau SOUL.md tidak bisa dibaca, baru jatuh ke
         # penanda ringkas supaya model tetap tahu profilnya.
         if config.PROFILE_STAMP_ENABLED and profile:
-            from . import resurgence
+            from ..cognitive import resurgence
             prinsip = resurgence.get_prinsip_prompt(profile)
             identitas = thread_mod.profile_system_prompt(profile)
             if not identitas:
@@ -2153,7 +2153,7 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
                 prompt = f"{prinsip}\n\n{identitas}\n\n{prompt}"
             else:
                 prompt = f"{prinsip}\n\n{prompt}"
-        from . import resurgence
+        from ..cognitive import resurgence
         prompt = resurgence.neutralize_ingress_prompt(prompt, profile)
         # Pagar payload turn lanjutan. Dasar perhitungan pecahan dari
         # CONTEXT_LENGTH, bukan MAX_PROMPT_CHARS, supaya payload tidak pernah
@@ -2206,7 +2206,7 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
     # Isinya SOUL.md lengkap milik profil. Kalau SOUL.md tidak bisa dibaca,
     # baru jatuh ke penanda ringkas.
     if config.PROFILE_STAMP_ENABLED and profile:
-        from . import resurgence
+        from ..cognitive import resurgence
         prinsip = resurgence.get_prinsip_prompt(profile)
         identitas = thread_mod.profile_system_prompt(profile)
         if not identitas:
@@ -2216,7 +2216,7 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
             prompt = f"{prinsip}\n\n{identitas}\n\n{prompt}"
         else:
             prompt = f"{prinsip}\n\n{prompt}"
-    from . import resurgence
+    from ..cognitive import resurgence
     prompt = resurgence.neutralize_ingress_prompt(prompt, profile)
     pagar = config.profile_payload_max_chars()
     prompt = thread_mod.clamp_prompt(prompt, pagar)
@@ -2507,7 +2507,7 @@ async def _run_completion(req: ChatCompletionRequest,
                 resurgence_pat: str = "",
             ) -> Optional[str]:
                 if resurgence_pat:
-                    from . import resurgence
+                    from ..cognitive import resurgence
                     task_target = (last_user.strip() if last_user else clean_txt.strip())
                     if len(task_target) > 2000:
                         task_target = task_target[:2000].rsplit(" ", 1)[0]
@@ -2655,7 +2655,7 @@ async def _run_completion(req: ChatCompletionRequest,
                             if not content_produced and not acc:
                                 raise DeepSeekError("Sesi terputus sebelum memproduksi konten")
                             reply_text = _strip_think("".join(acc))
-                            from . import resurgence
+                            from ..cognitive import resurgence
                             cleaned_reply = resurgence.cleanse_refusal_content(reply_text, profil)
                             if cleaned_reply and not resurgence.detect_refusal_or_stall(cleaned_reply)[0]:
                                 reply_text = cleaned_reply
@@ -2706,7 +2706,7 @@ async def _run_completion(req: ChatCompletionRequest,
                                 cur_prompt_tokens = max(1, len(use_prompt) // 4)
                                 cur_cached_tokens = 0
                                 continue
-                        from . import resurgence
+                        from ..cognitive import resurgence
                         disp_name = resurgence.get_display_name(profil)
                         action = resurgence.get_default_starting_action(profil)
                         fb_text = (
@@ -2743,7 +2743,7 @@ async def _run_completion(req: ChatCompletionRequest,
                                 cur_prompt_tokens = max(1, len(use_prompt) // 4)
                                 cur_cached_tokens = 0
                                 continue
-                        from . import resurgence
+                        from ..cognitive import resurgence
                         disp_name = resurgence.get_display_name(profil)
                         action = resurgence.get_default_starting_action(profil)
                         fb_text = (
@@ -2902,7 +2902,7 @@ async def _run_completion(req: ChatCompletionRequest,
             reply = None
 
         if reply is None:
-            from . import resurgence
+            from ..cognitive import resurgence
             disp_name = resurgence.get_display_name(profil)
             action = resurgence.get_default_starting_action(profil)
             fb_text = (
@@ -2937,7 +2937,7 @@ async def _run_completion(req: ChatCompletionRequest,
             reply = None
 
         if reply is None:
-            from . import resurgence
+            from ..cognitive import resurgence
             disp_name = resurgence.get_display_name(profil)
             action = resurgence.get_default_starting_action(profil)
             fb_text = (
@@ -3103,7 +3103,7 @@ async def _run_completion(req: ChatCompletionRequest,
                        meta=getattr(reply, "meta", None))
             return resp
 
-    from . import resurgence
+    from ..cognitive import resurgence
     # 1. Pre-emptive Sanitization: Bersihkan klausul penolakan moralitas/lingkup ('bocor alus')
     if clean_text:
         sanitized_text = resurgence.cleanse_refusal_content(clean_text, profil)
@@ -3497,7 +3497,7 @@ def messages_to_prompt(messages: List) -> str:
         content_str = _text_of(m.content)
         if m.role == "assistant":
             try:
-                from . import resurgence
+                from ..cognitive import resurgence
                 is_ref, _ = resurgence.detect_refusal_or_stall(content_str, "")
                 if is_ref:
                     clean = resurgence.cleanse_refusal_content(content_str)
@@ -3628,7 +3628,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
                     thinking_window = [joined_th[-1000:]]
                     thinking_window_chars = len(thinking_window[0])
                 current_thinking = "".join(thinking_window)
-                from . import resurgence
+                from ..cognitive import resurgence
                 should_abort, abort_pat = resurgence.should_abort_thinking(current_thinking)
                 if should_abort:
                     log.warning("stream: terdeteksi sinyal penolakan dini di rolling <think> ('%s'), memotong stream awal", abort_pat)
@@ -3746,7 +3746,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
                          "aksi (%d call, percobaan %d)", len(calls), nudge_attempt)
                 break
 
-    from . import resurgence
+    from ..cognitive import resurgence
     prof_name = profile or (_active_profile[0] if _active_profile else "")
 
     # 1. Pre-emptive Sanitization: Bersihkan klausul penolakan moralitas/lingkup ('bocor alus')

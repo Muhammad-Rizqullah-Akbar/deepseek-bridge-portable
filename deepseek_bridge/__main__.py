@@ -24,7 +24,7 @@ from pathlib import Path
 import uvicorn
 
 from .core import config
-from .cli import diagnostics, connect, hermes
+from .cli import diagnostics, connect, hermes, accounts
 
 
 def cmd_check(args) -> int:
@@ -122,7 +122,7 @@ def cmd_serve(args) -> int:
     host = "127.0.0.1" if config.HOST in ("127.0.0.1", "localhost") else "0.0.0.0"
 
     uvicorn.run(
-        "deepseek_bridge.server:app",
+        "deepseek_bridge.core.server:app",
         host=host,
         port=config.PORT,
         reload=getattr(args, "reload", False),
@@ -186,6 +186,20 @@ def build_parser() -> argparse.ArgumentParser:
     # status
     sp_stat = sub.add_parser("status", help="Cek status akun dan sesi")
     sp_stat.set_defaults(func=cmd_status)
+
+    # accounts
+    sp_acc = sub.add_parser("accounts", help="Kelola pool akun DeepSeek")
+    acc_sub = sp_acc.add_subparsers(dest="action")
+    sp_acc_list = acc_sub.add_parser("list", help="Daftar akun di pool")
+    sp_acc_list.set_defaults(func=accounts.cmd_accounts_list)
+    sp_acc_add = acc_sub.add_parser("add", help="Tambah akun baru")
+    sp_acc_add.add_argument("name", help="Nama akun (e.g. acc1)")
+    sp_acc_add.add_argument("--email", default="", help="Email akun")
+    sp_acc_add.set_defaults(func=accounts.cmd_accounts_add)
+    sp_acc_del = acc_sub.add_parser("del", help="Hapus akun dari pool")
+    sp_acc_del.add_argument("name", help="Nama akun")
+    sp_acc_del.set_defaults(func=accounts.cmd_accounts_del)
+    sp_acc.set_defaults(func=accounts.cmd_accounts_list)
 
     return p
 

@@ -1,1 +1,0 @@
-from .cognitive.lexicon import *
