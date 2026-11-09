@@ -1,125 +1,135 @@
-# DeepSeek Bridge Portable (v2.5.0)
+<div align="center">
 
-> **Enterprise-Grade, Zero-Token-Cost OpenAI-Compatible Gateway for DeepSeek V3 / R1 with Dynamic Hermes Native Integration.**
+# ⚡ DEEPSEEK BRIDGE PORTABLE
+### *Enterprise-Grade, Zero-Token-Cost OpenAI Gateway with Native Hermes Dynamic Introspection*
+
+[![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.0.0-68a063?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
+[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Context](https://img.shields.io/badge/Context%20Window-890%2C880%20Tokens-ff6b6b?style=for-the-badge)](https://chat.deepseek.com)
+[![Hermes Native](https://img.shields.io/badge/Hermes%20Agent-Native%20Modular-7952b3?style=for-the-badge)](https://github.com/nousresearch/hermes-agent)
+[![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=for-the-badge)](CONTRIBUTING.md)
+
+<p align="center">
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=18&duration=3000&pause=1000&color=00F0FF&center=true&vCenter=true&width=650&lines=Seamless+Multi-Account+DeepSeek+Web+Pooling;Zero-Token+Cost+High-Speed+LLM+Routing;1-Click+Hermes+Agent+Integration;Clean-Slate+%7C+Zero-Leakage+%7C+Dynamic+Discovery" alt="Typing SVG" />
+</p>
+
+[Fitur Utama](#-fitur-utama) • [Batasan Headless](#-batasan-penting-gui-vs-headless) • [Quickstart](#-quickstart-3-langkah) • [Kontribusi & Kolaborasi](#-berkontribusi--komunitas-developer) • [Lisensi](#-lisensi--penafian-disclaimer)
+
+---
+</div>
+
+> [!IMPORTANT]
+> **🚀 Zero-Cost Intelligence:** DeepSeek Bridge mengubah sesi web DeepSeek V3 / R1 menjadi endpoint standar OpenAI (`http://127.0.0.1:8787/v1`) dengan kuota context native **890,880 token**. Dirancang khusus untuk agen autonomous (seperti **Hermes Agent CLI / Desktop**) tanpa perlu membayar tagihan token API komersial.
 
 ---
 
-## 1. Ikhtisar Arsitektur
+## 🌟 Fitur Utama
 
-DeepSeek Bridge Portable dirancang untuk menjembatani agen autonomous (seperti **Hermes Agent CLI / Desktop**) dengan akun web DeepSeek tanpa biaya token API berbayar. Sistem ini mengemas teknologi bypass WAF, mitigasi deteksi bot, Proof-of-Work (PoW) solver berbasis WebAssembly, dan isolasi thread sesi.
-
-### Keunggulan Versi Portable:
-1. **Dynamic Hermes Profile Discovery:** Tidak ada lagi hardcode nama profil atau path absolut Windows (`C:\Users\...`). Bridge memindai `%LOCALAPPDATA%\hermes` atau `~/.hermes` secara dinamis, membaca `SOUL.md` lokal, dan mengisolasi konteks percakapan untuk profil apa pun yang dibuat di Hermes.
-2. **Clean-Slate & Relative Path Anchoring:** Direktori sesi browser dan cookie disimpan relatif terhadap project (`data/session/<account>/`). Bebas dipindahkan ke laptop, disk, atau sistem operasi lain tanpa merusak sesi login.
-3. **Penta-Layer Cognitive Engine (Terkunci & Terlindungi):**
-   * **`resurgence.py`**: Injeksi identitas dan sistem prompt tanpa memicu filter sensor.
-   * **`lexicon.py`**: Pemetaan token anti-censorship.
-   * **`tools_emu.py`**: Emulator tool calling dua arah yang kompatibel dengan protokol Hermes.
-   * **`recovery.py`**: Refusal neutralizer otomatis saat menghadapi penolakan hulu.
-4. **Resilient 9router Auto-Injection:** Auto-connect ke 9router Gateway (`:20128`) dengan skema payload yang valid (`apiType: "chat"`) dan penanganan error yang anggun.
+- 🧠 **Dynamic Hermes Introspection:** Bebas hardcode path! Otomatis mendeteksi direktori profil Hermes (`%LOCALAPPDATA%\hermes` atau `~/.hermes`), membaca `SOUL.md`, `USER.md`, dan `memories/` secara realtime.
+- 🔄 **Stateful Thread Continuity:** 1 Sesi percakapan Hermes dipetakan ke 1 `chat_session_id` DeepSeek tanpa membuat chat baru di setiap turn (mencegah akun kena suspend / spam bot).
+- 🛡️ **Penta-Layer Cognitive Defense:** Perlindungan bawaan terhadap refusal neutralizer, token censorship sanitizer, dan XML tool emulator untuk eksekusi coding tanpa henti.
+- 🔀 **Multi-Account Round-Robin Pool:** Menyeimbangkan beban request ke banyak akun DeepSeek sekaligus (`acc1`, `acc2`, dst) untuk throughput tinggi tanpa batas.
+- 📦 **Clean-Slate & Zero-Leakage:** Kredensial dan cookie sesi tersimpan relatif di `data/session/` dan 100% diabaikan oleh `.gitignore`. Aman di-clone dan di-share kapan saja.
+- 🔌 **1-Click 9router Connector:** Terintegrasi langsung dengan 9router Gateway (`:20128`) dengan skema payload valid (`apiType: "chat"`).
 
 ---
 
-## 2. Struktur Repositori Modular
+## ⚠️ Batasan Penting: GUI vs Headless
 
-```text
-deepseek-bridge-portable/
-├── .gitignore                   # Menjaga session, cookie, dan DB tidak bocor ke git
-├── .env.example                 # Template konfigurasi environment
-├── pyproject.toml               # Definisi packaging pip & CLI entry point
-├── README.md                    # Dokumentasi arsitektur & manual operasional
-├── bootstrap.bat                # 1-Click launcher untuk Windows (auto-venv & auto-check)
-│
-├── data/                        # [DI-IGNORE OLEH GIT / RUNTIME STORAGE]
-│   ├── session/                 # Profil Chromium & cookies sesi per akun
-│   │   ├── accounts.example.json
-│   │   └── accounts.json        # Template default: {"accounts": []}
-│   ├── state/                   # SQLite database (threads.db)
-│   └── wasm/                    # sha3_wasm_bg.wasm (PoW solver binary)
-│
-└── deepseek_bridge/             # [SOURCE PACKAGE UTAMA]
-    ├── __main__.py              # Router CLI utama
-    ├── cli/                     # Sub-perintah CLI (check, init, connect, setup-hermes)
-    ├── core/                    # Engine FastAPI server, upstream client, & dashboard
-    ├── cognitive/               # Penta-layer cognitive prompt stack (TERISOLASI)
-    ├── hermes/                  # Hermes dynamic discovery & SOUL.md reader
-    ├── browser/                 # Browser automation & WebAssembly PoW solver
-    └── state/                   # Account registry, pooling scheduler, & SQLite persistence
+> [!WARNING]
+> **Pahami Alur Autentikasi Sebelum Memasang di Server/VPS:**
+>
+> 1. **Login Pertama Wajib Memiliki Layar / Desktop GUI:**
+>    DeepSeek menggunakan puzzle captcha Cloudflare dan verifikasi OTP email saat login pertama. Playwright **harus membuka browser visual** (`headless=False`) untuk login awal.
+> 2. **Tidak Bisa Langsung Login di Headless Linux VPS Tanpa Display:**
+>    Jika kamu menjalankan `deepseek-bridge login` di VPS murni tanpa monitor / X11, Playwright akan melempar error `cannot open display`.
+> 3. **Solusi Portabilitas Lintas Perangkat:**
+>    Lakukan login sekali di laptop/PC lokal Anda. Salin file `data/session/<nama>/session.json` (format Plain JSON) ke folder VPS Anda di `data/session/<nama>/session.json`. Bridge di VPS langsung aktif seketika menggunakan `curl-cffi` tanpa butuh display browser!
+
+---
+
+## 🔄 Alur Integrasi Sistem
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 Pengguna
+    participant Hermes as ⚡ Hermes Agent CLI
+    participant NineRouter as 🔀 9router Gateway (:20128)
+    participant Bridge as 🌉 DeepSeek Bridge (:8787)
+    participant DeepSeek as 🌐 DeepSeek Web Cloud
+
+    User->>Hermes: hermes -p mr-robot chat
+    Hermes->>NineRouter: POST /v1/chat/completions (model: dsk/dsk-auto)
+    Note over NineRouter: Routing prefix 'dsk' -> Bridge
+    NineRouter->>Bridge: Forward payload (SOUL + USER + MEMORY)
+    Note over Bridge: Dynamic Profile Detection & Thread Reuse
+    Bridge->>DeepSeek: Stream completion via curl-cffi (TLS Impersonate)
+    DeepSeek-->>Bridge: Raw Stream (<think> + Markdown)
+    Bridge-->>NineRouter: OpenAI-compatible SSE Stream
+    NineRouter-->>Hermes: Live Tokens Delivery
+    Hermes-->>User: Respons Agen Selesai
 ```
 
 ---
 
-## 3. Alur Penggunaan di Device Baru (Fresh Machine)
+## 🚀 Quickstart (3 Langkah)
 
-### Langkah 1: Kloning Repositori
+### 1. Inisialisasi Otomatis (1-Click)
 ```bash
-git clone <url-repo-anda> deepseek-bridge-portable
+git clone https://github.com/<username>/deepseek-bridge-portable.git
 cd deepseek-bridge-portable
-```
 
-### Langkah 2: Inisialisasi Otomatis (Windows 1-Click)
-Cukup jalankan:
-```powershell
+# Di Windows:
 .\bootstrap.bat
-```
-Atau manual via terminal:
-```bash
-pip install -e .
-deepseek-bridge init
+
+# Di Linux / macOS:
+chmod +x bootstrap.sh && ./bootstrap.sh
 ```
 
-### Langkah 3: Pre-Flight Audit
-Jalankan auditor untuk memverifikasi kesiapan sistem:
+### 2. Jalankan Pre-Flight Auditor
 ```bash
 deepseek-bridge check
 ```
-Auditor akan memeriksa:
-* Python 3.10+ (64-bit)
-* Node.js runtime (>= 22.0.0 untuk kompatibilitas 9router `undici`)
-* Native libraries (`wasmtime`, `curl-cffi`, `playwright`)
-* Status reachability 9router di `:20128`
-* Daftar profil Hermes yang terdeteksi secara dinamis
+Memverifikasi kesiapan Node.js (>=22.0.0), dependensi biner (`wasmtime`, `curl-cffi`, `playwright`), status port 8787, koneksi 9router, serta profil Hermes lokal.
 
-### Langkah 4: Jalankan Server Gateway
+### 3. Sinkronisasi 9router & Hermes
 ```bash
-deepseek-bridge serve
-```
-* **Base URL:** `http://127.0.0.1:8787/v1`
-* **Dashboard Web:** `http://127.0.0.1:8787/`
-
-### Langkah 5: Daftarkan Akun ke Pool (Web Dashboard)
-1. Buka browser ke `http://127.0.0.1:8787/`
-2. Klik tombol **"Add Account"**
-3. Jendela browser otomatis terbuka. Masukkan email Proton/Gmail dan kode verifikasi DeepSeek.
-4. Token sesi langsung tersimpan ke `data/session/<nama>/` dan otomatis masuk ke antrean round-robin pooling.
-
-### Langkah 6: Hubungkan ke 9router & Hermes
-Buka terminal baru:
-```bash
-# 1. Injeksi otomatis ke 9router Gateway
+# Injeksi bridge ke 9router Gateway
 deepseek-bridge connect xenonite
 
-# 2. Injeksi konfigurasi global Hermes (dsk/dsk-auto dengan 890k context)
+# Injeksi konfigurasi global Hermes (890k context window)
 deepseek-bridge setup-hermes
-```
 
-### Langkah 7: Jalankan Hermes Agent
-Hermes langsung dapat digunakan dengan profil apa pun:
-```bash
+# Mulai gunakan agen Hermes favoritmu!
 hermes -p mr-robot chat
-# atau
-hermes -p elliot-alderson chat
-# atau
-hermes -p darlene-alderson chat
 ```
 
 ---
 
-## 4. Keamanan & Kebersihan Repositori (Git Hygiene)
+## 🤝 Berkontribusi & Komunitas Developer
 
-File kredensial, cookie browser, dan database percakapan otomatis diabaikan oleh `.gitignore`:
-* `data/session/acc*` $\rightarrow$ **DI-IGNORE**
-* `data/state/*.db` $\rightarrow$ **DI-IGNORE**
-* `.env` $\rightarrow$ **DI-IGNORE**
+Proyek ini dibangun secara open-source untuk komunitas AI agent, hacker, dan reverse engineer. Kami sangat terbuka terhadap kontribusi, saran perbaikan, maupun fitur baru!
 
-Repositori ini aman untuk di-push ke GitHub / GitLab publik maupun privat tanpa risiko kebocoran akun.
+### Cara Berkontribusi:
+1. **Fork** repositori ini & buat branch fitur baru (`git checkout -b feature/ide-brilian`).
+2. Jalankan `deepseek-bridge check` untuk memastikan tidak ada regresi.
+3. Kirim **Pull Request (PR)** dengan penjelasan teknis yang komprehensif.
+4. Baca panduan kontribusi lengkap di [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### 💡 Ide Pengembangan Terbuka:
+- 🐳 **Docker + Xvfb:** Kontainerisasi dengan virtual display agar login Playwright bisa berjalan di VPS tanpa monitor fisik.
+- 🧩 **Multi-Agent Adapters:** Integrasi langsung ke Claude Code, AutoGen, CrewAI, atau framework LLM lainnya.
+- 📊 **Telemetry Dashboard:** Peningkatan grafik monitoring performa token dan latensi di UI dashboard web.
+
+> **Punya pertanyaan atau ingin berdiskusi arsitektur?**
+> Buka [GitHub Issues](https://github.com/<username>/deepseek-bridge-portable/issues) atau mulai diskusi di [GitHub Discussions](https://github.com/<username>/deepseek-bridge-portable/discussions). Kami siap berkolaborasi!
+
+---
+
+## 📜 Lisensi & Penafian (Disclaimer)
+
+Didistribusikan di bawah **MIT License**. Lihat file [LICENSE](LICENSE) untuk informasi lengkap.
+
+> **Penafian Hukum:** Proyek ini merupakan perkakas otomasi mandiri untuk tujuan riset dan integrasi agen lokal. Proyek ini tidak berafiliasi, didukung, atau dikembangkan oleh DeepSeek Inc. Pengguna bertanggung jawab penuh atas penggunaan dan kepatuhan terhadap ketentuan layanan penyedia terkait.
