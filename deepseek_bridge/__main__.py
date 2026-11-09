@@ -176,7 +176,7 @@ def cmd_dashboard(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="deepseek-bridge",
-        description="Portable, Zero-Cost OpenAI-Compatible Gateway for DeepSeek V3/R1 & Hermes",
+        description="Portable, Zero-Cost OpenAI-Compatible Gateway for DeepSeek Latest (Chat & Reasoner) & Hermes",
     )
     sub = p.add_subparsers(dest="subcommand")
 

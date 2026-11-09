@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "deepseek-bridge-portable"
 version = "2.5.0"
-description = "Enterprise-Grade, Zero-Token-Cost OpenAI-Compatible Gateway for DeepSeek V3/R1 & Dynamic Hermes Native Integration"
+description = "Enterprise-Grade, Zero-Token-Cost OpenAI-Compatible Gateway for DeepSeek Latest (Chat & Reasoner) & Dynamic Hermes Native Integration"
 readme = "README.md"
 license = { text = "MIT" }
 authors = [{ name = "Muhammad-Rizqullah-Akbar", email = "inirizqullahakbar@gmail.com" }]

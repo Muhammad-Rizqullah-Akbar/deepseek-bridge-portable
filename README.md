@@ -21,7 +21,7 @@
 </div>
 
 > [!IMPORTANT]
-> **🚀 Zero-Cost Autonomous Infrastructure:** DeepSeek Bridge menjembatani Web Engine DeepSeek V3 / R1 menjadi endpoint standar OpenAI (`http://127.0.0.1:8787/v1`) dengan context window native **890,880 token**. Dirancang untuk menjalankan beban kerja agen otonom (seperti **Hermes Agent CLI / Desktop**) tanpa perlu membayar tagihan token API komersial.
+> **🚀 Zero-Cost Autonomous Infrastructure:** DeepSeek Bridge menjembatani Web Engine DeepSeek Latest (selalu mengikuti versi model chat & reasoner DeepSeek terkini secara realtime) menjadi endpoint standar OpenAI (`http://127.0.0.1:8787/v1`) dengan context window native **890,880 token**. Dirancang untuk menjalankan beban kerja agen otonom (seperti **Hermes Agent CLI / Desktop**) tanpa perlu membayar tagihan token API komersial.
 
 ---
 
