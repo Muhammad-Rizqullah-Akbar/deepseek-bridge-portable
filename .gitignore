@@ -1,0 +1,37 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+
+# C extensions
+*.so
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# Virtual environments & local env
+.env
+.venv/
+venv/
+
+# Project Runtime Data (Clean Slate)
+data/session/acc*
+data/session/*.json
+!data/session/accounts.example.json
+data/state/*.db
+data/state/*.db-*
+data/state/*.log
+threads.db
+threads.db-*
+*.log
+
+# Editor & System
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
