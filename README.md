@@ -150,6 +150,7 @@ hermes -p mr-robot chat
 | :--- | :--- |
 | `deepseek-bridge check` | Audit komprehensif runtime, biner, port, dan profil agen |
 | `deepseek-bridge init` | Inisialisasi template folder data lokal dan driver Playwright |
+| `deepseek-bridge dashboard` *(alias `ui`, `gui`)* | Membuka Web Dashboard GUI di browser (auto-launch server jika belum aktif) |
 | `deepseek-bridge serve` | Menjalankan server gateway OpenAI-compatible di port 8787 |
 | `deepseek-bridge connect` | Menginjeksi node provider dan koneksi otomatis ke 9router |
 | `deepseek-bridge setup-hermes` | Mengunci konfigurasi global Hermes ke 890,880 token context |

@@ -146,6 +146,33 @@ def cmd_status(args) -> int:
     return 0
 
 
+def cmd_dashboard(args) -> int:
+    """Buka Web Dashboard GUI di browser default."""
+    import time
+    import threading
+    import webbrowser
+    from .cli.diagnostics import check_bridge_port
+
+    host = getattr(config, "HOST", "127.0.0.1")
+    if host in ("::", "0.0.0.0"):
+        host = "127.0.0.1"
+    port = getattr(config, "PORT", 8787)
+    url = f"http://{host}:{port}/"
+
+    is_running, _ = check_bridge_port(host, port)
+    if is_running:
+        print(f"[*] Gateway aktif. Membuka Dashboard Web di browser: {url}")
+        webbrowser.open(url)
+        return 0
+
+    print(f"[*] Gateway belum aktif di {url}. Menjalankan server dan membuka Dashboard...")
+    def _open_delayed():
+        time.sleep(1.2)
+        webbrowser.open(url)
+    threading.Thread(target=_open_delayed, daemon=True).start()
+    return cmd_serve(args)
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="deepseek-bridge",
@@ -186,6 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
     # status
     sp_stat = sub.add_parser("status", help="Cek status akun dan sesi")
     sp_stat.set_defaults(func=cmd_status)
+
+    # dashboard
+    sp_dash = sub.add_parser("dashboard", aliases=["ui", "gui"], help="Buka Web Dashboard GUI di browser default")
+    sp_dash.set_defaults(func=cmd_dashboard)
 
     # accounts
     sp_acc = sub.add_parser("accounts", help="Kelola pool akun DeepSeek")
