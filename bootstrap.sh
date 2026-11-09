@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -e
 
+# 0. Kunci direktori kerja ke folder script berada
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$DIR"
+
 echo "===================================================================="
 echo "       DEEPSEEK BRIDGE PORTABLE - 1-CLICK BOOTSTRAP (UNIX)"
 echo "===================================================================="
@@ -22,9 +26,11 @@ source .venv/bin/activate
 
 # 4. Install dependensi jika package belum terpasang
 if ! python3 -c "import deepseek_bridge" &>/dev/null; then
-    echo "[*] Menginstal package dan driver browser Playwright..."
-    pip install --upgrade pip
+    echo "[*] Memperbarui pip, setuptools, dan wheel..."
+    pip install --upgrade pip setuptools wheel
+    echo "[*] Menginstal dependensi package deepseek_bridge..."
     pip install -e .
+    echo "[*] Memasang browser engine Playwright (Chromium)..."
     python3 -m playwright install chromium
 fi
 

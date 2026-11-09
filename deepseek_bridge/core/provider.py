@@ -19,8 +19,18 @@ from __future__ import annotations
 import logging
 from typing import Iterator, List, Optional
 
-from webmodel_core.contracts import (
-    BridgeError, BridgeProvider, ModelInfo, Reply)
+try:
+    from webmodel_core.contracts import (
+        BridgeError, BridgeProvider, ModelInfo, Reply)
+except ImportError:
+    class BridgeError(Exception):
+        pass
+    class BridgeProvider:
+        pass
+    class ModelInfo:
+        pass
+    class Reply:
+        pass
 
 log = logging.getLogger("deepseek_bridge.provider")
 
@@ -48,8 +58,8 @@ class DeepSeekProvider(BridgeProvider):
         harus tetap bisa mulai dan melaporkan provider mana yang bermasalah.
         """
         if self._client is None:
-            from deepseek_bridge.auth import get_session
-            from deepseek_bridge.client import DeepSeekClient
+            from ..browser.auth import get_session
+            from .client import DeepSeekClient
             self._client = DeepSeekClient(get_session())
         return self._client
 
@@ -64,7 +74,7 @@ class DeepSeekProvider(BridgeProvider):
     # --- kontrak -----------------------------------------------------------
 
     def models(self) -> List[ModelInfo]:
-        from deepseek_bridge import config
+        from . import config
         out = []
         for mid in config.PUBLISHED_MODELS:
             cap = config.MODEL_CAPABILITIES.get(mid, {})
@@ -83,7 +93,7 @@ class DeepSeekProvider(BridgeProvider):
         DeepSeek web memakai "default" dan "expert", bukan nama model
         OpenAI-style. Pemetaan ada di deepseek_bridge.config.MODEL_MAP.
         """
-        from deepseek_bridge import config
+        from . import config
         return config.resolve_model_type(model)
 
     def chat(self, prompt: str, conversation_id: Optional[str] = None,
@@ -136,7 +146,7 @@ class DeepSeekProvider(BridgeProvider):
         Kode asli dipertahankan supaya server generik bisa memutuskan
         apakah error layak diulang tanpa perlu tahu nama provider.
         """
-        from deepseek_bridge.client import DeepSeekError
+        from .client import DeepSeekError
         if isinstance(e, DeepSeekError):
             fatal = bool(getattr(e, "is_invalid_token", False)) or \
                 bool(getattr(e, "is_muted", False))

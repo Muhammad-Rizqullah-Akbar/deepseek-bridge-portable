@@ -26,9 +26,9 @@ from typing import Iterator, List, Optional
 
 from curl_cffi import requests as cffi_requests
 
-from .. import config
-from ..auth import Session, get_session
-from ..pow import DeepSeekPow
+from . import config
+from ..browser.auth import Session, get_session
+from ..browser.pow import DeepSeekPow
 
 log = logging.getLogger("deepseek_bridge.client")
 
@@ -411,13 +411,13 @@ class DeepSeekClient:
                         "Mencoba refresh sesi headless...",
                         r.status_code, r.headers.get("x-amzn-waf-action")
                     )
-                    from ..auth import _headless_refresh
-                    from ..accounts import AccountRegistry
+                    from ..browser.auth import _headless_refresh
+                    from ..state.registry import AccountRegistry
                     try:
                         reg = AccountRegistry.load()
                         for acc in reg.accounts.values():
                             if acc.session.exists():
-                                from ..auth import Session
+                                from ..browser.auth import Session
                                 s = Session.load(acc.session)
                                 if s and s.token == self.session.token:
                                     new_sess = _headless_refresh(profile_dir=acc.profile, session_file=acc.session)

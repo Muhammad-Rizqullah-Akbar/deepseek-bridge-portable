@@ -72,6 +72,13 @@ sequenceDiagram
 >    Jika Anda menjalankan `deepseek-bridge login` di Linux VPS murni tanpa X11 / Wayland, Playwright akan melempar error `cannot open display`.
 > 3. **Solusi Portabilitas Lintas Perangkat:**
 >    Lakukan login sekali di laptop/PC lokal Anda. Salin file `data/session/<nama>/session.json` (format Plain JSON) ke folder VPS Anda di `data/session/<nama>/session.json`. Bridge di VPS langsung aktif seketika menggunakan `curl-cffi` tanpa butuh display browser!
+>
+> ---
+>
+> **🛡️ Prosedur Login Aman (Anti-Burst & Proton Mail Co-Existence):**
+> - **Anti-Burst Single-Hit:** DeepSeek sangat sensitif terhadap percobaan login berulang dalam waktu singkat (*burst login*). Bridge dirancang dengan alur single-hit: navigasi hanya dilakukan satu kali dan polling sesi dilakukan secara pasif tanpa reload halaman.
+> - **Tab Co-Existence untuk Proton Mail OTP:** Jika menggunakan akun Proton Mail, **buka tab baru di jendela browser yang sama** untuk membuka webmail Proton dan melihat kode OTP. Membuka Proton Mail di browser terpisah berisiko memicu proteksi anomali IP/fingerprint dari Proton yang menyebabkan blacklist akun. Bridge secara ketat hanya menangkap token dan cookie dari tab `chat.deepseek.com`.
+> - **Verifikasi Awal Tanpa Penutupan Mendadak:** Saat sesi berhasil tertangkap, banner hijau akan disuntikkan ke tab DeepSeek dan jendela browser **tetap dibiarkan aktif**. Anda dapat memverifikasi akun Anda terlebih dahulu sebelum menutup browser.
 
 ---
 

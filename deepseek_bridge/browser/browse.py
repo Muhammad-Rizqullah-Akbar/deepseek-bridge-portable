@@ -1,21 +1,23 @@
-"""Buka DeepSeek di Chrome untuk satu akun langsung di desktop interaktif visual.
+"""Buka DeepSeek di Chrome/Edge untuk satu akun langsung di desktop interaktif visual.
 
 Dipanggil dari CLI atau dashboard:
-    python -m deepseek_bridge.browse <nama_akun>
+    python -m deepseek_bridge.browser.browse <nama_akun>
 
 Arsitektur:
-1. Membuka binary Chrome secara langsung (native executable) di Session desktop
-   interaktif pengguna (WinSta0\\Default) tanpa pembungkus Node.js terisolasi,
-   sehingga jendela visual 'DeepSeek' DIJAMIN 100% muncul di monitor fisik Maestro.
+1. Membuka binary Chrome/Edge/Playwright Chromium secara langsung (native executable) di Session desktop
+   interaktif pengguna (WinSta0\\Default) tanpa pembungkus terisolasi,
+   sehingga jendela visual 'DeepSeek' DIJAMIN muncul di monitor fisik.
 2. Mengaktifkan port remote debugging (CDP) spesifik per akun.
 3. Menghubungkan Playwright ke browser via `connect_over_cdp` untuk memantau
    `localStorage.userToken` dan cookies secara real-time tanpa mengganggu pengguna.
-4. Otomatis menyimpan `session.json` begitu login berhasil.
-5. Menutup koneksi dan proses secara bersih saat pengguna menutup jendela Chrome.
+4. Tab non-DeepSeek (seperti Proton Mail untuk melihat kode OTP) diizinkan co-exist tanpa distorsi sesi.
+5. Otomatis menyimpan `session.json` begitu login berhasil dan menyuntikkan visual banner ke tab DeepSeek.
+6. Browser dibiarkan tetap aktif untuk verifikasi pengguna hingga jendela ditutup secara sukarela.
 """
 
 from __future__ import annotations
 
+import glob
 import logging
 import os
 import shutil
@@ -23,6 +25,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import Optional, List, Union
 
 # Setup logging
 logging.basicConfig(
@@ -32,15 +35,16 @@ logging.basicConfig(
 )
 log = logging.getLogger("browse")
 
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
+ROOT = Path(__file__).resolve().parent.parent.parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from deepseek_bridge import config
-from deepseek_bridge.accounts import AccountRegistry
-from deepseek_bridge.auth import (
-    _capture_from_context, Session, _clean_stale_profile_locks, _READ_TOKEN_JS
+from ..core import config
+from ..state.registry import AccountRegistry
+from .auth import (
+    _capture_from_context, Session, _clean_stale_profile_locks, _READ_TOKEN_JS,
+    is_deepseek_tab, _INJECT_SUCCESS_BANNER_JS, _safe_evaluate
 )
-from typing import Optional, List, Union
 
 
 class Win32Process:
@@ -165,7 +169,7 @@ def launch_gui_process(cmd_list_or_str: Union[str, List[str]], desktop: str = r"
 
 
 def _bring_proc_to_foreground(pid: int) -> None:
-    """Angkat jendela proses ke lapisan paling depan (foreground) di desktop fisik Maestro."""
+    """Angkat jendela proses ke lapisan paling depan (foreground) di desktop fisik."""
     if sys.platform != "win32":
         return
     import ctypes
@@ -190,61 +194,66 @@ def _bring_proc_to_foreground(pid: int) -> None:
 
 
 def _find_chrome_path() -> str:
-    """Temukan executable Google Chrome di sistem Windows."""
+    """Temukan executable Chromium di sistem Windows (Chrome -> Edge -> Playwright)."""
     candidates = [
         r"C:\Program Files\Google\Chrome\Application\chrome.exe",
         r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+        r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+        r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
     ]
     local_app = os.environ.get("LOCALAPPDATA")
     if local_app:
         candidates.append(str(Path(local_app) / "Google" / "Chrome" / "Application" / "chrome.exe"))
+        candidates.append(str(Path(local_app) / "Microsoft" / "Edge" / "Application" / "msedge.exe"))
+        pw_matches = glob.glob(str(Path(local_app) / "ms-playwright" / "chromium-*" / "chrome-win" / "chrome.exe"))
+        candidates.extend(pw_matches)
 
     for c in candidates:
         if Path(c).is_file():
             return c
 
-    which_chrome = shutil.which("chrome") or shutil.which("chrome.exe")
-    if which_chrome:
-        return which_chrome
+    for name in ("chrome", "chrome.exe", "msedge", "msedge.exe"):
+        which = shutil.which(name)
+        if which:
+            return which
 
     return "chrome.exe"
 
 
 def run_browse(account_name: str) -> int:
     reg = AccountRegistry.load()
-    acc = reg.accounts.get(account_name)
+    acc = reg.get(account_name)
     if acc is None:
         log.error("Akun '%s' tidak ditemukan di registry (%s)", account_name, reg.path)
         return 1
 
-    profile_dir = Path(acc.profile_dir)
-    session_file = Path(acc.session_file)
+    profile_dir = Path(acc.profile)
+    session_file = Path(acc.session)
     profile_dir.mkdir(parents=True, exist_ok=True)
     session_file.parent.mkdir(parents=True, exist_ok=True)
 
     stop_file = profile_dir / ".stop_browser"
     stop_file.unlink(missing_ok=True)
 
-    # Bersihkan file lock usang jika proses Chrome sebelumnya mati mendadak
+    # Bersihkan file lock usang jika proses browser sebelumnya mati mendadak
     _clean_stale_profile_locks(profile_dir)
 
-    chrome_exe = _find_chrome_path()
-    if not Path(chrome_exe).is_file() and chrome_exe != "chrome.exe":
-        log.error("Google Chrome tidak ditemukan di path standar!")
+    browser_exe = _find_chrome_path()
+    if not Path(browser_exe).is_file() and browser_exe not in ("chrome.exe", "msedge.exe"):
+        log.error("Browser Chromium/Chrome/Edge tidak ditemukan!")
         return 1
 
-    # Port CDP spesifik per akun agar tidak bentrok jika multi-browser dibuka
     digits = "".join(c for c in account_name if c.isdigit())
     cdp_port = 9330 + (int(digits) if digits else 1)
 
-    log.info("Membuka Chrome visual desktop untuk akun '%s'...", account_name)
-    log.info("  Profil: %s", profile_dir)
-    log.info("  Sesi  : %s", session_file)
-    log.info("  Port  : %d", cdp_port)
+    log.info("Membuka browser visual desktop untuk akun '%s'...", account_name)
+    log.info("  Binary : %s", browser_exe)
+    log.info("  Profil : %s", profile_dir)
+    log.info("  Sesi   : %s", session_file)
+    log.info("  Port   : %d", cdp_port)
 
-    # Luncurkan Chrome langsung sebagai aplikasi GUI desktop interaktif
     cmd = [
-        chrome_exe,
+        browser_exe,
         f"--user-data-dir={profile_dir}",
         f"--remote-debugging-port={cdp_port}",
         "--no-first-run",
@@ -259,11 +268,11 @@ def run_browse(account_name: str) -> int:
         else:
             proc = subprocess.Popen(cmd)
     except Exception as e:
-        log.error("Gagal meluncurkan Chrome executable: %s", e)
+        log.error("Gagal meluncurkan browser executable: %s", e)
         return 1
 
-    log.info("Chrome terbuka di desktop Maestro (PID %d). Menghubungkan pengawas CDP...", proc.pid)
-    time.sleep(0.8)
+    log.info("Browser terbuka di desktop (PID %d). Menghubungkan pengawas CDP...", proc.pid)
+    time.sleep(1.0)
     _bring_proc_to_foreground(proc.pid)
 
     from playwright.sync_api import sync_playwright
@@ -272,10 +281,9 @@ def run_browse(account_name: str) -> int:
 
     with sync_playwright() as p:
         browser = None
-        # Beri waktu Chrome startup dan mengikat port CDP
         for attempt in range(40):
             if proc.poll() is not None:
-                log.info("Chrome ditutup sebelum pengawas terhubung.")
+                log.info("Browser ditutup sebelum pengawas terhubung.")
                 return 0
             try:
                 browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
@@ -284,21 +292,20 @@ def run_browse(account_name: str) -> int:
                 time.sleep(0.5)
 
         if not browser:
-            log.warning("Pengawas CDP tidak dapat terhubung, Chrome tetap aktif untuk pengguna.")
+            log.warning("Pengawas CDP tidak dapat terhubung, browser tetap aktif untuk pengguna.")
             try:
                 proc.wait()
             except Exception:
                 pass
             return 0
 
-        log.info("Pengawas sesi CDP terhubung. Silakan login atau selesaikan captcha di Chrome.")
+        log.info("Pengawas sesi CDP terhubung. Silakan login atau selesaikan captcha di browser.")
 
         last_check = 0.0
         try:
             while proc.poll() is None:
-                # Periksa apakah ada permintaan tutup dari dashboard
                 if stop_file.exists():
-                    log.info("Sinyal stop diterima dari dashboard. Menutup browser...")
+                    log.info("Sinyal stop diterima. Menutup browser...")
                     stop_file.unlink(missing_ok=True)
                     try:
                         proc.terminate()
@@ -307,26 +314,22 @@ def run_browse(account_name: str) -> int:
                     break
 
                 now = time.time()
-                if now - last_check >= 1.5:
+                if now - last_check >= 2.0:
                     last_check = now
                     try:
                         contexts = browser.contexts
                         if contexts:
                             for ctx in contexts:
                                 for p_curr in ctx.pages:
-                                    try:
-                                        p_url = p_curr.url
-                                    except Exception:
-                                        continue
-                                    if "deepseek.com" not in p_url:
+                                    if not is_deepseek_tab(p_curr):
                                         continue
                                     s = _capture_from_context(ctx, p_curr)
                                     if s and s.token:
                                         s.save(session_file)
+                                        _safe_evaluate(p_curr, _INJECT_SUCCESS_BANNER_JS)
                                         if not token_captured:
                                             log.info("Token & cookies berhasil ditangkap dan disimpan ke %s!", session_file.name)
                                             token_captured = True
-                                            # Notifikasi server agar langsung reload tanpa perlu restart
                                             try:
                                                 import urllib.request
                                                 req = urllib.request.Request("http://127.0.0.1:8787/admin/reload", data=b"")
@@ -336,7 +339,6 @@ def run_browse(account_name: str) -> int:
                                                 pass
                                         break
                     except Exception as loop_err:
-                        # Error sementara selama navigasi/halaman berpindah, jangan putus loop
                         log.debug("Pengawas loop CDP toleran terhadap: %s", loop_err)
 
                 time.sleep(0.5)

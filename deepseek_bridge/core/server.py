@@ -272,7 +272,7 @@ def get_session_for(account: AccountState):
     `forbid_token_in` menyertakan berkas sesi akun lain supaya token yang
     ternyata milik akun lain ditolak, bukan dipakai berdampingan.
     """
-    from .auth import get_session as _gs
+    from ..browser.auth import get_session as _gs
     others = [a.session_file for a in get_pool().accounts.values()
               if a.name != account.name]
     return _gs(
@@ -1196,17 +1196,17 @@ def _run_profile_window(name: str, profile_dir: Path, holder: dict) -> None:
     if sys.platform == "win32":
         si.lpDesktop = "WinSta0\\Default"
 
-    from .auth import _clean_stale_profile_locks
+    from ..browser.auth import _clean_stale_profile_locks
     _clean_stale_profile_locks(Path(profile_dir))
     py_exe = sys.executable
     if sys.platform == "win32":
         candidate_w = sys.executable.replace("python.exe", "pythonw.exe")
         if Path(candidate_w).is_file():
             py_exe = candidate_w
-    cmd = [py_exe, "-m", "deepseek_bridge.browse", name]
+    cmd = [py_exe, "-m", "deepseek_bridge.browser.browse", name]
     try:
         if sys.platform == "win32":
-            from .browse import launch_gui_process
+            from ..browser.browse import launch_gui_process
             proc = launch_gui_process(cmd, desktop=r"WinSta0\Default")
         else:
             proc = subprocess.Popen(
