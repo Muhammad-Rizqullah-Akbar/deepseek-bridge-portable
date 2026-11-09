@@ -163,8 +163,8 @@ hermes -p mr-robot chat
 
 > [!NOTE]
 > ### 💙 Penghormatan untuk Tim DeepSeek
-> **DeepSeek adalah salah satu pelopor paling visioner, dermawan, dan berdampak paling besar dalam sejarah kecerdasan buatan modern.**
-> Keberanian dan komitmen mereka merilis model-model berbobot terbuka (*open-weights*) dengan performa kelas dunia telah mendemokratisasi akses AI, meruntuhkan monopoli korporasi raksasa, dan memajukan peradaban teknologi untuk seluruh umat manusia. Kami menaruh rasa hormat dan terima kasih yang setinggi-tingginya kepada seluruh peneliti dan insinyur di DeepSeek.
+> **DeepSeek adalah penyedia AI Open-Source sejati (bukan sekadar open-weight), dan itulah keunggulan paling monumental serta hadiah terbesar mereka bagi peradaban teknologi dunia.**
+> Keberanian dan komitmen mereka merilis arsitektur model, kode, dan bobot secara terbuka penuh (*truly open-source*) dengan performa frontier kelas dunia telah mendemokratisasi akses kecerdasan buatan, meruntuhkan hegemoni korporasi tertutup, dan membuka gerbang inovasi bagi jutaan developer di seluruh dunia. Kami menaruh rasa hormat, apresiasi, dan terima kasih yang setinggi-tingginya kepada seluruh peneliti dan insinyur di DeepSeek.
 
 ### 🎯 Mengapa Proyek Ini Diciptakan?
 Proyek ini lahir murni sebagai inisiatif jembatan bagi para **mahasiswa, peneliti independen, developer pemula, dan pembelajar mandiri** yang memiliki keterbatasan finansial dan sumber daya komputasi. Tujuannya adalah agar rekan-rekan pembelajar tetap dapat merasakan kehebatan arsitektur agen otonom tingkat lanjut (seperti ekosistem Nous Hermes) menggunakan model frontier tanpa terhalang tembok biaya API komersial.
