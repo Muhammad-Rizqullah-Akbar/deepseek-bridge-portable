@@ -88,8 +88,8 @@ def profile_stamp(profile: str, max_chars: int = 600) -> str:
     nama = normalize_profile(profile)
     if not nama:
         return ""
-    from .profiles import get_profil
-    from . import resurgence
+    from ..hermes.discovery import get_profil
+    from ..cognitive import resurgence
     profil = get_profil(nama)
     disp = resurgence.get_display_name(nama)
     if profil:
@@ -115,8 +115,8 @@ def profile_system_prompt(profile: str, max_chars: int = 0) -> str:
     nama = normalize_profile(profile)
     if not nama:
         return ""
-    from .profiles import get_profil
-    from . import resurgence
+    from ..hermes.discovery import get_profil
+    from ..cognitive import resurgence
     profil = get_profil(nama)
     teks = profil.soul_text() if profil else ""
     prinsip = resurgence.get_prinsip_prompt(nama)
@@ -174,7 +174,11 @@ def profile_from_messages(messages) -> str:
     Hanya pesan system yang diperiksa. Pesan user atau assistant tidak
     dipercaya karena isinya bisa berasal dari pihak lain.
     """
-    from .profiles import PROFILES
+    try:
+        from ..hermes import discovery
+        profiles = discovery.scan_profiles()
+    except Exception:
+        profiles = {}
 
     if not isinstance(messages, list):
         return ""
@@ -192,26 +196,29 @@ def profile_from_messages(messages) -> str:
         if not teks:
             continue
 
-        # Baris Identitas lebih dulu. Bentuknya di SOUL.md:
-        #   > **Identitas:** Elliot Alderson (`elliot-alderson`)
+        # 1. Baris Identitas lebih dulu (SOUL.md & Hermes Personality)
         for baris in teks.split("\n"):
-            if "Identitas" not in baris:
-                continue
-            for nama in PROFILES:
-                if f"`{nama}`" in baris or nama in baris:
-                    return nama
-            if "mr. robot" in baris.lower() or "mr robot" in baris.lower():
-                return "mr-robot"
+            if "identitas" in baris.lower():
+                for nama in profiles:
+                    if f"`{nama}`" in baris or nama in baris.lower():
+                        return nama
+                if "mr. robot" in baris.lower() or "mr robot" in baris.lower():
+                    return "mr-robot"
 
-        # Cadangan: judul SOUL.md, bentuknya "# SOUL.md : ELLIOT ALDERSON"
+        # 2. Judul SOUL.md atau Header Profile Hermes
         for baris in teks.split("\n"):
-            if not baris.startswith("#"):
-                continue
-            for nama in PROFILES:
-                if nama.replace("-", " ") in baris.lower().replace("-", " "):
-                    return nama
-            if "mr. robot" in baris.lower() or "mr robot" in baris.lower():
-                return "mr-robot"
+            if baris.startswith("#"):
+                for nama in profiles:
+                    clean_name = nama.replace("-", " ")
+                    if clean_name in baris.lower().replace("-", " "):
+                        return nama
+                if "mr. robot" in baris.lower() or "mr robot" in baris.lower():
+                    return "mr-robot"
+
+        # 3. Path signature matching (memories, profile folders, etc.)
+        for nama in profiles:
+            if nama != "default" and (f"/{nama}/" in teks or f"\\{nama}\\" in teks or f"profile: {nama}" in teks.lower()):
+                return nama
 
     return ""
 
@@ -607,7 +614,7 @@ def bootstrap_prompt(messages: List, limit: int = BOOTSTRAP_MAX_CHARS,
                  "tool": "Tool"}.get(role or "user", "User")
         if role == "assistant":
             try:
-                from . import resurgence
+                from ..cognitive import resurgence
                 is_ref, _ = resurgence.detect_refusal_or_stall(text, "")
                 if is_ref:
                     clean = resurgence.cleanse_refusal_content(text)
