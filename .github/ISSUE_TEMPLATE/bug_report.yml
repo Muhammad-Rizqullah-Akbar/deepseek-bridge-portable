@@ -1,0 +1,70 @@
+name: 🐛 Bug Report
+description: Laporkan bug, kegagalan request, atau error pada DeepSeek Bridge
+title: "[BUG]: "
+labels: ["bug", "triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Terima kasih telah melaporkan kendala. Pastikan Anda telah menjalankan `deepseek-bridge check` sebelum mengisi formulir ini.
+
+  - type: input
+    id: os_version
+    attributes:
+      label: Sistem Operasi & Arsitektur
+      description: Contoh: Windows 11 x64, Ubuntu 24.04 LTS, macOS Sonoma M3
+      placeholder: Windows 11 x64
+    validations:
+      required: true
+
+  - type: input
+    id: runtime_versions
+    attributes:
+      label: Versi Python & Node.js
+      description: Contoh: Python 3.12.2, Node.js v22.23.4
+      placeholder: Python 3.12, Node 22
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Komponen yang Bermasalah
+      options:
+        - 9router Integration (:20128)
+        - Hermes Agent Dynamic Discovery
+        - Browser Login & Captcha (Playwright)
+        - Token Streaming & Refusal Neutralizer
+        - Multi-Account Pooling Scheduler
+        - CLI Tools (init, check, setup-hermes)
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction_steps
+    attributes:
+      label: Langkah Reproduksi Masalah
+      description: Jelaskan urutan langkah hingga error terjadi.
+      placeholder: |
+        1. Jalankan 'deepseek-bridge serve'
+        2. Buka terminal lain dan ketik 'hermes -p mr-robot chat'
+        3. Kirim prompt: '...'
+        4. Muncul pesan error: '...'
+    validations:
+      required: true
+
+  - type: textarea
+    id: check_output
+    attributes:
+      label: Output 'deepseek-bridge check'
+      description: Tempelkan hasil audit diagnosa terminal Anda.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log Terminal / Error Stack Trace
+      description: Tempelkan log error lengkap (sensor token/kredensial Anda jika ada).
+      render: shell

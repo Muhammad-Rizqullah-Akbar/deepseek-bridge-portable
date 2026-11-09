@@ -1,0 +1,49 @@
+name: CI System Audit & Integrity Check
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  audit:
+    name: Test Package & Architecture on ${{ matrix.os }} (Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'pip'
+
+      - name: Install Package & Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: Verify Module Imports & Zero Circular Dependencies
+        run: |
+          python -c "
+          import deepseek_bridge
+          from deepseek_bridge.core import config, server, client, dashboard, schemas
+          from deepseek_bridge.cognitive import resurgence, lexicon, tools_emu, recovery
+          from deepseek_bridge.hermes import discovery, profile
+          from deepseek_bridge.browser import auth, browse, pow
+          from deepseek_bridge.state import pool, registry, threads, db, apikeys, cache
+          from deepseek_bridge.cli import diagnostics, connect, hermes, accounts
+          print('[OK] All domain modules imported successfully.')
+          "
+
+      - name: Run Pre-Flight Diagnostics
+        run: |
+          python -m deepseek_bridge check

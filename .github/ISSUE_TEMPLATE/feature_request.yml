@@ -1,0 +1,38 @@
+name: ✨ Feature Request
+description: Usulkan ide baru, adapter agen, atau optimasi arsitektur
+title: "[FEATURE]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Punya ide untuk membuat DeepSeek Bridge lebih tangguh dan scalable? Ceritakan kepada kami!
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Masalah / Kebutuhan yang Ingin Diselesaikan
+      description: Deskripsi kendala atau kebutuhan integrasi saat ini.
+      placeholder: Saat ini bridge belum mendukung... sehingga kami kesulitan untuk...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Usulan Solusi atau Implementasi
+      description: Bagaimana Anda membayangkan fitur ini bekerja secara teknis?
+      placeholder: Tambahkan adapter Docker dengan Xvfb virtual framebuffer agar...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: contribution_interest
+    attributes:
+      label: Apakah Anda Tertarik Mengirimkan Pull Request (PR)?
+      options:
+        - "Ya, saya siap berkontribusi langsung dengan kode"
+        - "Saya bisa membantu pengujian & validasi"
+        - "Hanya usulan ide, silakan tim pengembang mengkaji"
+    validations:
+      required: true
