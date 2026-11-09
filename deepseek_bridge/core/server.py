@@ -846,13 +846,23 @@ def admin_keepalive_run():
     return {"refreshed": refreshed, "status": keepalive_status()}
 
 
+_last_registry_mtime: float = 0.0
+
+
 def _registry_cache() -> AccountRegistry:
-    """Registry akun, dimuat sekali lalu dipakai ulang."""
-    global _registry
-    if _registry is None:
+    """Registry akun dengan deteksi perubahan berkas disk (mtime auto-sync)."""
+    global _registry, _last_registry_mtime
+    from ..state.registry import REGISTRY_FILE
+    try:
+        mtime = REGISTRY_FILE.stat().st_mtime if REGISTRY_FILE.exists() else 0.0
+    except OSError:
+        mtime = 0.0
+
+    if _registry is None or mtime != _last_registry_mtime:
         with _registry_lock:
-            if _registry is None:
-                _registry = AccountRegistry.load()
+            if _registry is None or mtime != _last_registry_mtime:
+                _registry = AccountRegistry.load(REGISTRY_FILE)
+                _last_registry_mtime = mtime
     return _registry
 
 

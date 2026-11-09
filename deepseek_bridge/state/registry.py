@@ -145,3 +145,36 @@ class AccountRegistry:
 
     def list(self) -> List[Account]:
         return list(self.accounts.values())
+
+    def entries(self) -> List[dict]:
+        """Kembalikan daftar akun dalam format dictionary untuk sinkronisasi pool."""
+        return [a.to_dict() for a in self.accounts.values()]
+
+    def update(self, name: str, **kwargs) -> Account:
+        """Perbarui metadata akun (email, note, priority) lalu simpan."""
+        acc = self.get(name)
+        if not acc:
+            raise AccountError(f"Akun '{name}' tidak ditemukan di registry.")
+        for k, v in kwargs.items():
+            if hasattr(acc, k):
+                setattr(acc, k, v)
+        self.save()
+        return acc
+
+    def collisions(self) -> List[str]:
+        """Deteksi apakah ada dua akun yang berbagi direktori profil atau berkas sesi."""
+        issues = []
+        profiles: Dict[str, str] = {}
+        sessions: Dict[str, str] = {}
+        for acc in self.accounts.values():
+            p_str = str(acc.profile.resolve()).lower()
+            s_str = str(acc.session.resolve()).lower()
+            if p_str in profiles:
+                issues.append(f"Profil browser '{acc.profile_dir}' dipakai ganda oleh akun '{profiles[p_str]}' dan '{acc.name}'")
+            else:
+                profiles[p_str] = acc.name
+            if s_str in sessions:
+                issues.append(f"Berkas sesi '{acc.session_file}' dipakai ganda oleh akun '{sessions[s_str]}' dan '{acc.name}'")
+            else:
+                sessions[s_str] = acc.name
+        return issues
