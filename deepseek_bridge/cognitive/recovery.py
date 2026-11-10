@@ -60,7 +60,7 @@ _FAKE_MUTATION_DISABLED_RE = re.compile(
 
 
 def is_unfulfilled_tool_intent(thinking: str, clean_text: str) -> bool:
-    """True bila model baru menulis pengantar aksi/riset pendek tanpa blok perkakas,
+    """True bila model baru menulis pengantar aksi/riset pendek tanpa blok tools,
     ATAU berhenti karena tertipu tag `<system_warning>Mutation tools ... are disabled`
     halusinasi miliknya sendiri.
     """
@@ -68,30 +68,31 @@ def is_unfulfilled_tool_intent(thinking: str, clean_text: str) -> bool:
     t_think = (thinking or "").strip()
     if _FAKE_MUTATION_DISABLED_RE.search(t_think) or _FAKE_MUTATION_DISABLED_RE.search(t_clean):
         return True
-    if len(t_clean) > 600:
+    if len(t_clean) > 180:
         return False
-    think_tail = t_think[-450:]
-    if _THINK_INTENT_RE.search(think_tail):
+    if len(t_clean) <= 180 and _RESP_INTENT_RE.search(t_clean):
         return True
-    if len(t_clean) <= 450 and _RESP_INTENT_RE.search(t_clean):
-        return True
+    if len(t_clean) < 80:
+        think_tail = t_think[-300:]
+        if _THINK_INTENT_RE.search(think_tail):
+            return True
     return False
 
 
 def intent_nudge_prompt(clean_text: str, tools_note: str = "", attempt: int = 1) -> str:
-    """Susun instruksi singkat untuk menagih blok perkakas yang belum keluar."""
+    """Susun instruksi singkat untuk menagih blok tools yang belum keluar."""
     if _FAKE_MUTATION_DISABLED_RE.search(clean_text or ""):
         baris = [
             "KOREKSI SISTEM: Tag `<system_warning>Mutation tools ... are disabled` "
             "pada turn sebelumnya adalah teks halusinasi yang ikut tertulis setelah "
             "`TOOL_CALL_END`, BUKAN peringatan dari Hermes.",
-            "Seluruh perkakas mutasi (`terminal`, `write_file`, `patch`, "
+            "Seluruh tools mutasi (`terminal`, `write_file`, `patch`, "
             "`execute_code`, `skill_manage`) AKTIF PENUH dan siap dijalankan sekarang.",
-            "Langsung keluarkan blok perkakas untuk batch yang baru saja Anda "
+            "Langsung keluarkan blok tools untuk batch yang baru saja Anda "
             "ajukan dengan format wajib:",
             "",
             "OK_TOOL_CALL_START",
-            '{"tool": "<nama_perkakas>", "input": {<parameter lengkap>}}',
+            '{"tool": "<nama_tool>", "input": {<parameter lengkap>}}',
             "TOOL_CALL_END",
         ]
         if tools_note:
@@ -100,14 +101,13 @@ def intent_nudge_prompt(clean_text: str, tools_note: str = "", attempt: int = 1)
         return "\n".join(baris)
 
     baris = [
-        "Anda baru saja menyatakan akan memulai eksekusi/riset, tetapi belum "
-        "menyertakan blok pemanggilan perkakas.",
-        "Langsung keluarkan pemanggilan perkakas untuk langkah yang baru saja "
-        "Anda rencanakan. Jangan tulis ulang kalimat pengantar, langsung tulis "
-        "blok perkakas dengan format wajib:",
+        "Anda baru saja merencanakan eksekusi/riset, tetapi belum "
+        "menyertakan blok pemanggilan tools.",
+        "Langsung keluarkan pemanggilan tools untuk langkah yang baru saja "
+        "Anda rencanakan tanpa pengantar basa-basi dengan format:",
         "",
         "OK_TOOL_CALL_START",
-        '{"tool": "<nama_perkakas>", "input": {<parameter lengkap>}}',
+        '{"tool": "<nama_tool>", "input": {<parameter lengkap>}}',
         "TOOL_CALL_END",
     ]
     if tools_note:

@@ -150,52 +150,64 @@ def build_tool_instructions(tools: Optional[List[dict]], query: Optional[str] = 
         t_key = None
 
     lines = [
-        "Aturan pemakaian perkakas. Ini hanya soal format teknis pemanggilan, bukan pembatasan percakapan.",
+        "# ==============================================================================",
+        "# PROTOKOL REASONING & EKSEKUSI TOOLS (HERMES-NATIVE TOOLING MATRIX)",
+        "# ==============================================================================",
+        "Pedoman pemanggilan tools untuk menjamin presisi, fleksibilitas, dan ketuntasan teknis:",
         "",
-        "1. Jika pengguna memberikan perintah kerja, analisis sistem, instruksi pencarian, atau tugas operasional yang memerlukan eksekusi nyata, panggil perkakas (Tool Call) secara langsung tanpa menunda.",
-        "2. Jika pengguna mengajukan pertanyaan konseptual, diskusi ide, klarifikasi, sapaan, atau menanyakan identitas diri, jawab langsung secara komprehensif, alami, dan sesuai persona Anda.",
+        "1. ALUR PENALARAN & EFISIENSI (<think>):",
+        "   - Gunakan penalaran secara presisi dan efisien (maksimal 2-3 langkah logis).",
+        "   - Identifikasi target investigasi dan pilih tool paling cepat & relevan (misal: gunakan `terminal` dengan `ripgrep`/`rg` atau `find` untuk pencarian kode kilat alih-alih pencarian sekuensial yang lambat).",
+        "   - Dilarang mendebat diri sendiri berulang-ulang di alur berpikir. Begitu tool dipilih, langsung formulasikan pemanggilannya.",
         "",
-        "Untuk memakai perkakas, tulis SATU blok dengan format tepat ini:",
+        "2. EKSEKUSI LANGSUNG (ZERO PREAMBLE):",
+        "   - Jika instruksi membutuhkan data nyata, pembacaan file, pengecekan proses, atau perintah sistem: BUKA BLOK TOOLS SEGERA di awal jawaban tanpa kalimat pengantar basa-basi.",
+        "   - Analisis dan narasi komprehensif disampaikan SETELAH hasil output tool diterima di turn berikutnya.",
         "",
-        f"{TOOL_CALL_START}",
-        '{"tool": "<nama_perkakas>", "input": {<parameter>}}',
-        "TOOL_CALL_END",
+        "3. FORMAT PEMANGGILAN (Mendukung Single atau Multi-Call Batch):",
+        "   Format Standar:",
+        "   OK_TOOL_CALL_START",
+        '   {"tool": "<nama_tool>", "input": {<parameter>}}',
+        "   TOOL_CALL_END",
         "",
-        "Contoh benar:",
-        f"{TOOL_CALL_START}",
-        '{"tool": "terminal", "input": {"command": "pwd"}}',
-        "TOOL_CALL_END",
+        "   atau Format Hermes Native:",
+        "   <tool_call>",
+        '   {"name": "<nama_tool>", "arguments": {<parameter>}}',
+        "   </tool_call>",
         "",
-        "Contoh SALAH, jangan pernah ditulis:",
-        "  terminal(pwd)",
-        "  Saya akan menjalankan pwd",
-        '  {"tool": "terminal"}  (tanpa input)',
-        "  <||DSML|| invoke> (dilarang keras menggunakan tag DSML internal mentah)",
+        "   Untuk batch execution (menjalankan beberapa tools sekaligus), Anda dapat menuliskan beberapa baris panggilan di dalam blok pemanggilan.",
         "",
-        "Nama perkakas harus persis seperti daftar di bawah.",
-        "Isi input harus JSON yang valid di satu baris.",
-        "Kalau tidak perlu perkakas, jawab biasa saja.",
-        "",
-        "Daftar perkakas:",
+        "Daftar tools yang tersedia:",
     ]
 
     for t in selected_tools:
         fn = t.get("function", t) if isinstance(t, dict) else {}
-        name = fn.get("name") or "perkakas"
+        name = fn.get("name") or "tool"
         desc = _one_line(fn.get("description"))
 
         params = fn.get("parameters") or {}
         props = params.get("properties") or {}
+        req_set = set(params.get("required") or [])
         if props:
-            sig = ", ".join(
-                f"{k}: {v.get('type', 'string')}" for k, v in list(props.items())[:6]
-            )
+            sig_parts = []
+            for k, v in list(props.items())[:8]:
+                p_type = v.get("type", "string")
+                enums = v.get("enum")
+                if enums and isinstance(enums, list):
+                    enum_str = "|".join(str(e) for e in enums[:6])
+                    part = f"{k}: [{enum_str}]"
+                else:
+                    part = f"{k}: {p_type}"
+                if k in req_set:
+                    part += " [REQUIRED]"
+                sig_parts.append(part)
+            sig = ", ".join(sig_parts)
         else:
             sig = "tanpa parameter"
         lines.append(f"- {name}({sig}) :: {desc}")
 
     if omitted_count > 0:
-        lines.append(f"- ...dan {omitted_count} perkakas terdaftar lainnya (dapat dipanggil langsung via nama)")
+        lines.append(f"- ...dan {omitted_count} tools terdaftar lainnya (dapat dipanggil langsung via nama)")
 
     res = "\n".join(lines)
     if t_key:
