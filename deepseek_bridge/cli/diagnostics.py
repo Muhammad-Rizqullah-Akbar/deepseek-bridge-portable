@@ -73,18 +73,28 @@ def check_native_deps() -> List[Tuple[str, bool, str]]:
     return results
 
 
-def check_bridge_port(host: str = "127.0.0.1", port: int = 8787) -> Tuple[bool, str]:
+def is_port_in_use(host: str = "127.0.0.1", port: int = 8787) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.settimeout(0.5)
-        is_used = s.connect_ex((host, port)) == 0
-    if is_used:
-        if httpx:
-            try:
-                r = httpx.get(f"http://{host}:{port}/healthz", timeout=1.0)
-                if r.status_code == 200:
-                    return True, f"Port {port} AKTIF melayani DeepSeek Bridge (Daemon Running)"
-            except Exception:
-                pass
+        return s.connect_ex((host, port)) == 0
+
+
+def is_bridge_running(host: str = "127.0.0.1", port: int = 8787) -> bool:
+    if not is_port_in_use(host, port):
+        return False
+    if httpx:
+        try:
+            r = httpx.get(f"http://{host}:{port}/healthz", timeout=1.0)
+            return r.status_code == 200
+        except Exception:
+            return False
+    return False
+
+
+def check_bridge_port(host: str = "127.0.0.1", port: int = 8787) -> Tuple[bool, str]:
+    if is_port_in_use(host, port):
+        if is_bridge_running(host, port):
+            return True, f"Port {port} AKTIF melayani DeepSeek Bridge (Daemon Running)"
         return False, f"Port {port} SEDANG DIGUNAKAN oleh proses lain (Tutup proses tersebut atau ubah DSB_PORT)"
     return True, f"Port {port} TERSEDIA (Siap digunakan)"
 

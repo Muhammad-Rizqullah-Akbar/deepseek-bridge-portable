@@ -121,14 +121,18 @@ def cmd_serve(args) -> int:
 
     host = "127.0.0.1" if config.HOST in ("127.0.0.1", "localhost") else "0.0.0.0"
 
-    from .cli.diagnostics import check_bridge_port
-    is_avail, port_msg = check_bridge_port(host, config.PORT)
-    if not is_avail:
-        print(f"\n[!] PERINGATAN: {port_msg}")
-        print(f"[*] Gateway kemungkinan sudah aktif di latar belakang.")
-        print(f"[*] Dashboard Web dapat langsung diakses di: http://127.0.0.1:{config.PORT}/")
-        print(f"[*] Untuk menjalankan di port lain, atur environment variable: DSB_PORT=<port>\n")
-        return 0
+    from .cli.diagnostics import is_port_in_use, is_bridge_running
+    if is_port_in_use(host, config.PORT):
+        if is_bridge_running(host, config.PORT):
+            print(f"[!] INFO: DeepSeek Bridge SUDAH AKTIF di latar belakang pada http://127.0.0.1:{config.PORT}/ (Daemon Running).")
+            print(f"[*] Hermes dan 9router sudah terhubung dan siap digunakan secara langsung.")
+            print(f"[*] Dashboard Web: http://127.0.0.1:{config.PORT}/")
+            print(f"[*] Anda tidak perlu menjalankan server baru lagi di terminal ini.\n")
+            return 0
+        else:
+            print(f"[!] PERINGATAN: Port {config.PORT} sedang digunakan oleh proses lain.")
+            print(f"[*] Tutup proses yang memakai port {config.PORT} atau gunakan DSB_PORT=<port> baru.\n")
+            return 1
 
     uvicorn.run(
         "deepseek_bridge.core.server:app",

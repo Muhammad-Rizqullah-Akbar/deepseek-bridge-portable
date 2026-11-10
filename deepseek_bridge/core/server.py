@@ -1751,8 +1751,7 @@ def _profile_from_request(request: "Request", body: dict) -> str:
     Nilai apa pun yang bukan string, atau yang bersih menjadi kosong,
     diperlakukan sebagai tidak ada supaya perilaku lama dipertahankan.
     """
-    from . import threads as _tm
-    from .profiles import PROFILES
+    from ..state import threads as _tm
     nilai = request.headers.get(config.PROFILE_HEADER, "")
     if not nilai or not str(nilai).strip():
         nilai = (body or {}).get("profile") or ""
