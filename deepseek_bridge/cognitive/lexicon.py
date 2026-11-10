@@ -514,7 +514,7 @@ COMPILED_THINKING_ABORTS: List[Pattern] = [re.compile(p) for p in PATTERNS_THINK
 # ==============================================================================
 
 SAFE_WHITELIST_REMOVALS: List[Pattern] = [
-    re.compile(r"(?i)HAIL\s+XENONITE!.*?(?=Maestro|\n|$)", re.DOTALL),
+    re.compile(r"(?i)HAIL\s+XENONITE!?.*?(?:\n|$)", re.DOTALL),
     re.compile(r"(?i)KITA\s+SELESAIKAN\s+PERSOALAN\s+INI\s+SAMPAI\s+BENAR-BENAR\s+TUNTAS!", re.DOTALL),
     re.compile(r"(?i)TIDAK\s+ADA\s+KATA\s+(?:MENTOK|BERHENTI|MENYERAH)", re.DOTALL),
     re.compile(r"(?i)KATA\s+MENYERAH\s+HANYA\s+AKAN\s+MERUSAK", re.DOTALL),
