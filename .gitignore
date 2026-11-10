@@ -27,6 +27,7 @@ data/state/*
 session/
 threads.db
 threads.db-*
+keys.json
 *.log
 
 # Editor & System

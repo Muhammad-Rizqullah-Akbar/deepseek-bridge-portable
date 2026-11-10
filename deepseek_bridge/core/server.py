@@ -203,10 +203,11 @@ def get_pool() -> AccountPool:
                     cooldown_seconds=config.COOLDOWN_SECONDS,
                     state_file=config.POOL_STATE_FILE,
                 )
-                _pool.load_persisted(config.POOL_STATE_FILE)
+                if config.POOL_STATE_FILE and config.POOL_STATE_FILE.exists():
+                    _pool.load_persisted(config.POOL_STATE_FILE)
                 log.info(
                     "pool akun siap: %s (%d akun)",
-                    ", ".join(a.name for a in accounts), len(accounts),
+                    ", ".join(a.name for a in accounts) if accounts else "(kosong)", len(accounts),
                 )
     return _pool
 
@@ -863,6 +864,7 @@ def _registry_cache() -> AccountRegistry:
             if _registry is None or mtime != _last_registry_mtime:
                 _registry = AccountRegistry.load(REGISTRY_FILE)
                 _last_registry_mtime = mtime
+                _reset_pool()
     return _registry
 
 

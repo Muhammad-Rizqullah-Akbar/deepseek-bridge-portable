@@ -99,7 +99,7 @@ class AccountPool:
 
     def __init__(
         self,
-        accounts: List[AccountState],
+        accounts: Optional[List[AccountState]] = None,
         # Jeda minimum antar request pada satu akun, detik.
         min_gap_seconds: float = 1.0,
         # Lama pendinginan setelah throttle, detik.
@@ -107,8 +107,7 @@ class AccountPool:
         # Berkas untuk menyimpan status mute. None mematikan persistensi.
         state_file: Optional[Path] = None,
     ):
-        if not accounts:
-            raise ValueError("Pool butuh minimal satu akun.")
+        accounts = accounts or []
         self.accounts: Dict[str, AccountState] = {a.name: a for a in accounts}
         self.min_gap_seconds = min_gap_seconds
         self.cooldown_seconds = cooldown_seconds
