@@ -24,7 +24,7 @@ from pathlib import Path
 import uvicorn
 
 from .core import config
-from .cli import diagnostics, connect, hermes, accounts, keys, models, logs
+from .cli import diagnostics, connect, hermes, accounts, keys, models, logs, updater
 
 
 def cmd_check(args) -> int:
@@ -397,6 +397,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp_test.add_argument("--host", default="127.0.0.1", help="Host server")
     sp_test.add_argument("--port", type=int, default=8787, help="Port server")
     sp_test.set_defaults(func=cmd_test)
+
+    # update / upgrade
+    sp_up = sub.add_parser("update", aliases=["upgrade"], help="Periksa dan terapkan pembaruan sistem dari GitHub")
+    sp_up.add_argument("--check", action="store_true", help="Hanya periksa pembaruan tanpa menerapkan")
+    sp_up.add_argument("-y", "--yes", action="store_true", help="Otomatis terapkan pembaruan tanpa konfirmasi interaktif")
+    sp_up.set_defaults(func=updater.cmd_update)
+
+    # version
+    sp_ver = sub.add_parser("version", help="Tampilkan versi aktif, commit hash, dan status repositori")
+    sp_ver.set_defaults(func=updater.cmd_version)
 
     return p
 

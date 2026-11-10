@@ -107,9 +107,10 @@ echo  [3] Buka Browser Desktop Profil Akun (Interaktif)
 echo  [4] Kelola Pool Akun & API Key (CLI Status)
 echo  [5] Uji Konektivitas Live Streaming (Test Chat)
 echo  [6] Hanya Jalankan Server Gateway (Console Only)
-echo  [7] Keluar
+echo  [7] Periksa Pembaruan Sistem (Auto-Update & Changelog)
+echo  [8] Keluar
 echo ====================================================================
-set /p USER_CHOICE="Pilihan Anda [1-7] (Default: 1): "
+set /p USER_CHOICE="Pilihan Anda [1-8] (Default: 1): "
 
 if "%USER_CHOICE%"=="" set "USER_CHOICE=1"
 if "%USER_CHOICE%"=="1" (
@@ -161,6 +162,13 @@ if "%USER_CHOICE%"=="6" (
     goto :end
 )
 if "%USER_CHOICE%"=="7" (
+    echo.
+    "%VENV_PY%" -m deepseek_bridge update
+    echo.
+    pause
+    goto :end
+)
+if "%USER_CHOICE%"=="8" (
     exit /b 0
 )
 

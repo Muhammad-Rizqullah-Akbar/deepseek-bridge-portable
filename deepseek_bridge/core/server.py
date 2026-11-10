@@ -1107,6 +1107,24 @@ def admin_reload(reset_cooldowns: bool = False):
     return hasil
 
 
+@app.get("/admin/updater/status")
+def admin_updater_status():
+    """Periksa status pembaruan kode dan changelog dari hulu GitHub."""
+    from ..cli import updater
+    return updater.check_updates()
+
+
+@app.post("/admin/updater/apply")
+def admin_updater_apply():
+    """Terapkan pembaruan kode hulu secara instan dan muat ulang modul."""
+    from ..cli import updater
+    ok, msg, commits = updater.apply_update()
+    if ok:
+        reload_res = admin_reload(reset_cooldowns=False)
+        return {"ok": True, "message": msg, "commits": commits, "reload": reload_res}
+    return JSONResponse(status_code=500, content={"ok": False, "message": msg, "commits": []})
+
+
 def get_registry() -> AccountRegistry:
     """Alias supaya pemanggilan dari startup dan endpoint seragam."""
     return _registry_cache()

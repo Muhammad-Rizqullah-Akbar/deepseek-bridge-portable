@@ -257,6 +257,14 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 | `deepseek-bridge setup-hermes` | Mengonfigurasi global config Hermes (`~/.hermes/config.json`) ke `dsk/dsk-auto` (890k context) |
 | `deepseek-bridge test [prompt]` | Mengirim live streaming chat completion untuk menguji latensi (TTFT) dan respons bridge |
 
+### 8. Sistem Pembaruan & Versioning (`update`, `version`)
+| Perintah | Alias | Deskripsi & Parameter |
+| :--- | :--- | :--- |
+| `deepseek-bridge version` | — | Menampilkan versi rilis, hash commit Git aktif, branch, dan status sinkronisasi remote |
+| `deepseek-bridge update` | `upgrade` | Memeriksa pembaruan dari GitHub, menampilkan visual changelog, dan menerapkan update secara instan |
+| `deepseek-bridge update --check` | — | Hanya memeriksa pembaruan dan menampilkan daftar changelog tanpa melakukan update kode |
+| `deepseek-bridge update -y` | — | Menerapkan pembaruan secara otomatis tanpa prompt konfirmasi terminal |
+
 ---
 
 ## 🕊️ Manifesto Penggunaan Beretika & Apresiasi untuk DeepSeek
