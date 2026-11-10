@@ -194,19 +194,68 @@ hermes -p mr-robot chat
 
 ---
 
-## 🎛️ Referensi Perintah CLI
+## 🎛️ Referensi Lengkap Perintah CLI
 
-| Perintah | Deskripsi |
+DeepSeek Bridge Portable menyediakan CLI terpadu yang 100% interoperabel dengan format modular:
+
+```text
+deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
+```
+
+### 1. Server & Visual Control
+| Perintah | Alias | Deskripsi |
+| :--- | :--- | :--- |
+| `deepseek-bridge serve` | — | Menjalankan server gateway OpenAI-compatible di port 8787 (mendukung `--reload`) |
+| `deepseek-bridge dashboard` | `ui`, `gui` | Membuka Web Dashboard GUI di browser default (otomatis menyalakan server jika belum aktif) |
+| `deepseek-bridge check` | — | Menjalankan audit diagnosa menyeluruh (Python, Node, Wasmtime, curl-cffi, Playwright, Port, 9router, Hermes) |
+| `deepseek-bridge init` | — | Inisialisasi struktur folder data lokal (`data/session`, `data/state`) dan browser engine |
+| `deepseek-bridge status` | — | Memeriksa ringkasan status akun terdaftar dan validitas sesi di disk |
+
+### 2. Autentikasi & Browser Sesi
+| Perintah | Alias | Deskripsi & Contoh |
+| :--- | :--- | :--- |
+| `deepseek-bridge login [nama]` | — | Membuka jendela browser interaktif untuk login manual OTP/Captcha (`deepseek-bridge login acc1`) |
+| `deepseek-bridge browse [nama]` | `open` | Membuka browser visual interaktif profil akun untuk verifikasi atau inspeksi manual |
+
+### 3. Manajemen Pool Akun (`accounts`)
+| Perintah | Deskripsi & Parameter |
 | :--- | :--- |
-| `deepseek-bridge check` | Audit komprehensif runtime, biner, port, dan profil agen |
-| `deepseek-bridge init` | Inisialisasi template folder data lokal dan driver Playwright |
-| `deepseek-bridge dashboard` *(alias `ui`, `gui`)* | Membuka Web Dashboard GUI di browser (auto-launch server jika belum aktif) |
-| `deepseek-bridge serve` | Menjalankan server gateway OpenAI-compatible di port 8787 |
-| `deepseek-bridge connect` | Menginjeksi node provider dan koneksi otomatis ke 9router |
-| `deepseek-bridge setup-hermes` | Mengunci konfigurasi global Hermes ke 890,880 token context |
-| `deepseek-bridge accounts list` | Menampilkan tabel status akun dan validitas sesi pool |
-| `deepseek-bridge accounts add <n>` | Mendaftarkan slot akun baru ke antrean pooling |
-| `deepseek-bridge login <n>` | Membuka jendela browser visual untuk login OTP/Captcha |
+| `deepseek-bridge accounts list` | Menampilkan seluruh akun di pool, email, status sesi, dan prioritas |
+| `deepseek-bridge accounts add <nama>` | Menambahkan akun baru ke registry (`deepseek-bridge accounts add acc2 --email user@proton.me`) |
+| `deepseek-bridge accounts del <nama>` | Menghapus akun dari antrean pool (`deepseek-bridge accounts del acc2`) |
+
+### 4. Manajemen API Keys (`keys`)
+| Perintah | Deskripsi & Parameter |
+| :--- | :--- |
+| `deepseek-bridge keys list` | Menampilkan daftar seluruh API key internal, kuota harian, RPM, dan status |
+| `deepseek-bridge keys create <nama>` | Membuat API key baru (`deepseek-bridge keys create agen1 --rpm 60 --gap 1.0 --conc 2`) |
+| `deepseek-bridge keys del <target>` | Menghapus API key berdasarkan nama atau token |
+| `deepseek-bridge keys enable <target>` | Mengaktifkan kembali API key yang dinonaktifkan |
+| `deepseek-bridge keys disable <target>`| Menonaktifkan API key seketika tanpa menghapusnya |
+
+### 5. Manajemen Model Wire (`models`)
+| Perintah | Deskripsi & Parameter |
+| :--- | :--- |
+| `deepseek-bridge models list` | Menampilkan model terdaftar, target internal wire (`default`/`expert`), dan status publikasi |
+| `deepseek-bridge models add <nama>` | Menambahkan alias model baru (`deepseek-bridge models add dsk-coder --target expert --publish`) |
+| `deepseek-bridge models edit` | Menu interaktif visual (navigasi panah terminal) untuk mengubah nama, target, dan publikasi model |
+| `deepseek-bridge models publish <n>` | Mempublikasikan model ke endpoint `/v1/models` agar dikenali otomatis oleh 9router |
+| `deepseek-bridge models unpublish <n>` | Menarik model dari endpoint `/v1/models` (tetap aktif sebagai alias internal) |
+| `deepseek-bridge models del <nama>` | Menghapus alias model dari registry |
+
+### 6. Telemetry & Log Monitoring (`log`)
+| Perintah | Alias | Deskripsi & Opsi |
+| :--- | :--- | :--- |
+| `deepseek-bridge log` | `logs` | Memantau riwayat request telemetry dari SQLite (`--limit 50`, `--json`) |
+| `deepseek-bridge log -f` | `logs -f` | Mode real-time tailing live request yang sedang diproses bridge |
+| `deepseek-bridge log --status error` | — | Memfilter log request berdasarkan status (`ok`, `throttled`, `error`) atau sesi (`--session`) |
+
+### 7. Integrasi Ekosistem & Testing
+| Perintah | Deskripsi & Parameter |
+| :--- | :--- |
+| `deepseek-bridge connect [key_name]` | Otomatis menginjeksi node provider dan koneksi bridge ke 9router Gateway (`:20128`) |
+| `deepseek-bridge setup-hermes` | Mengonfigurasi global config Hermes (`~/.hermes/config.json`) ke `dsk/dsk-auto` (890k context) |
+| `deepseek-bridge test [prompt]` | Mengirim live streaming chat completion untuk menguji latensi (TTFT) dan respons bridge |
 
 ---
 

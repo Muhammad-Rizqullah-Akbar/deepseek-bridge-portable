@@ -101,17 +101,20 @@ echo.
 echo ====================================================================
 echo                    PILIH AKSI OPERASIONAL:
 echo ====================================================================
-echo  [1] Jalankan Server Gateway dan Dashboard Web (Default)
+echo  [1] Jalankan Server Gateway & Buka Dashboard Web (Default)
 echo  [2] Hubungkan / Login Akun DeepSeek (Anti-Burst Window)
-echo  [3] Hanya Jalankan Server Gateway (Headless Console)
-echo  [4] Keluar
+echo  [3] Buka Browser Desktop Profil Akun (Interaktif)
+echo  [4] Kelola Pool Akun & API Key (CLI Status)
+echo  [5] Uji Konektivitas Live Streaming (Test Chat)
+echo  [6] Hanya Jalankan Server Gateway (Console Only)
+echo  [7] Keluar
 echo ====================================================================
-set /p USER_CHOICE="Pilihan Anda [1-4] (Default: 1): "
+set /p USER_CHOICE="Pilihan Anda [1-7] (Default: 1): "
 
 if "%USER_CHOICE%"=="" set "USER_CHOICE=1"
 if "%USER_CHOICE%"=="1" (
     echo.
-    echo [*] Membuka Dashboard Web...
+    echo [*] Menjalankan Server Gateway dan Membuka Dashboard Web...
     "%VENV_PY%" -m deepseek_bridge dashboard
     goto :end
 )
@@ -123,16 +126,41 @@ if "%USER_CHOICE%"=="2" (
     echo.
     echo Tekan sembarang tombol untuk kembali menjalankan server...
     pause >nul
-    "%VENV_PY%" -m deepseek_bridge serve
+    "%VENV_PY%" -m deepseek_bridge dashboard
     goto :end
 )
 if "%USER_CHOICE%"=="3" (
     echo.
-    echo [*] Menjalankan server gateway...
-    "%VENV_PY%" -m deepseek_bridge serve
+    set /p ACC_NAME="Masukkan nama akun (Default: default): "
+    if "!ACC_NAME!"=="" set "ACC_NAME=default"
+    "%VENV_PY%" -m deepseek_bridge browse !ACC_NAME!
     goto :end
 )
 if "%USER_CHOICE%"=="4" (
+    echo.
+    echo [*] Memeriksa daftar akun pool...
+    "%VENV_PY%" -m deepseek_bridge accounts list
+    echo.
+    echo [*] Memeriksa daftar API key...
+    "%VENV_PY%" -m deepseek_bridge keys list
+    echo.
+    pause
+    goto :end
+)
+if "%USER_CHOICE%"=="5" (
+    echo.
+    "%VENV_PY%" -m deepseek_bridge test
+    echo.
+    pause
+    goto :end
+)
+if "%USER_CHOICE%"=="6" (
+    echo.
+    echo [*] Menjalankan server gateway console...
+    "%VENV_PY%" -m deepseek_bridge serve
+    goto :end
+)
+if "%USER_CHOICE%"=="7" (
     exit /b 0
 )
 
