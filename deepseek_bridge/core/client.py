@@ -354,7 +354,7 @@ class DeepSeekClient:
             headers=self._base_headers(),
             cookies=self.session.cookies,
             timeout=(30.0, 300.0),
-            impersonate="chrome120",
+            impersonate=config.CURL_IMPERSONATE,
         )
         self._pow_prewarmer.replenish_async(self)
 

@@ -806,7 +806,7 @@ def _keepalive_once(account: str) -> bool:
             headers=headers,
             cookies=session.cookies,
             timeout=10.0,
-            impersonate="chrome120",
+            impersonate=config.CURL_IMPERSONATE,
         )
         if r.status_code == 200:
             try:

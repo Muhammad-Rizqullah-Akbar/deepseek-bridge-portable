@@ -231,6 +231,7 @@ INDEX_PREPARE_PATH = "/api/v0/index/prepare"
 # Versi klien yang dikirim website, diambil dari tangkapan Playwright nyata.
 # Sebelum patch ini bridge mengirim 2.0.0 padahal website mengirim 2.7.0.
 CLIENT_VERSION = "2.7.0"
+CURL_IMPERSONATE = os.getenv("DSB_IMPERSONATE", "chrome110")
 
 # --- Model -----------------------------------------------------------------
 # DeepSeek web mengenal dua mode bernama, dipetakan ke model V4:
