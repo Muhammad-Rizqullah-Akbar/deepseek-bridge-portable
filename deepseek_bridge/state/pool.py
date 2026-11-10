@@ -52,6 +52,16 @@ class AccountState:
     in_flight: int = 0
     lock: threading.Lock = field(default_factory=threading.Lock)
 
+    def __post_init__(self) -> None:
+        sf = Path(self.session_file)
+        if not sf.is_absolute():
+            sf = config.ROOT / sf
+        self.session_file = sf
+        pd = Path(self.profile_dir)
+        if not pd.is_absolute():
+            pd = config.ROOT / pd
+        self.profile_dir = pd
+
     @property
     def key(self) -> str:
         return self.name

@@ -416,6 +416,11 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    try:
+        if config.ROOT.exists():
+            os.chdir(config.ROOT)
+    except Exception:
+        pass
     parser = build_parser()
     args = parser.parse_args(argv)
     if not args.subcommand:
