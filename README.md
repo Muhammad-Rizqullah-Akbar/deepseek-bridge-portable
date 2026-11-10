@@ -72,13 +72,56 @@ sequenceDiagram
 >    Jika Anda menjalankan `deepseek-bridge login` di Linux VPS murni tanpa X11 / Wayland, Playwright akan melempar error `cannot open display`.
 > 3. **Solusi Portabilitas Lintas Perangkat:**
 >    Lakukan login sekali di laptop/PC lokal Anda. Salin file `data/session/<nama>/session.json` (format Plain JSON) ke folder VPS Anda di `data/session/<nama>/session.json`. Bridge di VPS langsung aktif seketika menggunakan `curl-cffi` tanpa butuh display browser!
->
-> ---
->
-> **🛡️ Prosedur Login Aman (Anti-Burst & Proton Mail Co-Existence):**
-> - **Anti-Burst Single-Hit:** DeepSeek sangat sensitif terhadap percobaan login berulang dalam waktu singkat (*burst login*). Bridge dirancang dengan alur single-hit: navigasi hanya dilakukan satu kali dan polling sesi dilakukan secara pasif tanpa reload halaman.
-> - **Tab Co-Existence untuk Proton Mail OTP:** Jika menggunakan akun Proton Mail, **buka tab baru di jendela browser yang sama** untuk membuka webmail Proton dan melihat kode OTP. Membuka Proton Mail di browser terpisah berisiko memicu proteksi anomali IP/fingerprint dari Proton yang menyebabkan blacklist akun. Bridge secara ketat hanya menangkap token dan cookie dari tab `chat.deepseek.com`.
-> - **Verifikasi Awal Tanpa Penutupan Mendadak:** Saat sesi berhasil tertangkap, banner hijau akan disuntikkan ke tab DeepSeek dan jendela browser **tetap dibiarkan aktif**. Anda dapat memverifikasi akun Anda terlebih dahulu sebelum menutup browser.
+
+---
+
+## 🛡️ Arsitektur Sesi 24/7 & Protokol Login Aman (Safe Login Protocol)
+
+DeepSeek Bridge Portable dirancang agar akun DeepSeek yang terhubung diperlakukan **persis seperti manusia yang menggunakan browser fisik sehari-hari**, memastikan keamanan akun maksimal dan uptime operasional 24/7 tanpa putus.
+
+```mermaid
+flowchart TD
+    subgraph AuthLayer["1. Safe Login Protocol (Manual 1x)"]
+        A[deepseek-bridge login] --> B[Launch Persistent Chromium Profile]
+        B --> C[Stealth Bot Neutralizer: Hide webdriver, mock plugins & chrome]
+        C --> D[Single-Hit Navigation ke chat.deepseek.com]
+        D --> E[Buka Tab Baru: Proton Mail OTP di Jendela yang Sama]
+        E --> F[Scoping Ketat: Hanya tangkap token & cookie .deepseek.com]
+        F --> G[Injeksi Success Banner Hijau ke DOM & Safe Teardown]
+    end
+
+    subgraph RuntimeLayer["2. Tri-Tier Self-Healing Keepalive (24/7 Uptime)"]
+        H[Server Running :8787] --> I[Tier 1: Lightweight Heartbeat tiap 15m]
+        I -->|HTTP 200 Probe| J[Update Cookie & Timestamp via curl-cffi]
+        
+        I --> K{Cek Umur Token JWT exp}
+        K -->|Sisa Umur < 4 Jam| L[Tier 2: Proactive Headless Token Renewal]
+        L -->|Headless Profile Context| M[Tangkap JWT Baru dari localStorage]
+        
+        I --> N{Respons Upstream Error?}
+        N -->|Code 40003 / INVALID_TOKEN| O[Tier 3: Reactive Self-Healing Recovery]
+        N -->|Status 202 / AWS WAF Challenge| O
+        O -->|Auto Headless Refresh| M
+        M --> P[Sesi Pulih Otomatis Tanpa Server Restart]
+    end
+```
+
+### 1. Persistent Chromium Profile (Satu Akun, Satu Sandbox)
+Setiap akun DeepSeek memiliki direktori profil Chromium mandiri di `data/session/<nama>/profile`.
+- Cookie jar, Web Storage, IndexedDB, dan Device ID tersimpan persisten di disk host.
+- Browser tidak pernah login dari nol di setiap sesi: sesi login DeepSeek bertahan berbulan-bulan (30–90 hari) sebagaimana browser harian Anda.
+
+### 2. Protokol Login Anti-Banned & Co-Existence Webmail
+- **Anti-Burst Single-Hit:** DeepSeek sangat sensitif terhadap percobaan login berulang dalam waktu singkat (*burst login*). Bridge menavigasikan browser tepat 1 kali dan memantau status autentikasi secara pasif tanpa reload beruntun.
+- **Proton Mail / Webmail Co-Existence:** Jika Anda menggunakan Proton Mail, **buka tab baru di jendela browser yang sama** untuk menyalin kode OTP. Membuka Proton Mail di browser/perangkat berbeda dapat memicu deteksi anomali IP/fingerprint Proton yang menyebabkan akun di-blacklist. Bridge memfilter URL dan cookie secara ketat: data Proton Mail tidak akan pernah tersentuh atau mencemari sesi DeepSeek.
+- **Stealth Initialization Injected:** Sebelum halaman DeepSeek dimuat, script stealth otomatis menutupi `navigator.webdriver`, memalsukan `window.chrome`, `navigator.plugins`, dan `navigator.languages` agar tidak memicu proteksi Cloudflare Turnstile maupun AWS WAF.
+- **Visual In-DOM Confirmation:** Setelah token `userToken` (JWT) tertangkap, banner hijau disuntikkan langsung ke tab DeepSeek. Jendela browser dibiarkan aktif agar Anda dapat memverifikasi akun sebelum menekan `[ENTER]` di terminal.
+
+### 3. Tri-Tier Self-Healing Keepalive Engine (Uptime 24/7)
+Server memelihara sesi secara otomatis di latar belakang:
+1. **Tier 1 (Lightweight Heartbeat - tiap 15 menit):** Probe HTTP non-intrusif memanggil `/api/v0/users/current` menggunakan `curl-cffi` (`impersonate="chrome120"`). Cookies diperbarui dan timestamp sesi disinkronkan tanpa membebani RAM/CPU.
+2. **Tier 2 (Proactive Headless Renewal):** Dekoder internal membaca klaim `exp` pada JWT. Jika sisa umur token kurang dari **4 jam** (atau usia sesi mendekati batas maksimum), bridge secara proaktif menjalankan refresh headless di latar belakang menggunakan profil Chromium akun untuk menangkap token segar sebelum token lama kedaluwarsa.
+3. **Tier 3 (Reactive Self-Healing Fallback):** Jika hulu mengembalikan error `INVALID_TOKEN` (40003) atau AWS WAF Challenge (status 202), bridge seketika membuang token mati dan memperbarui sesi secara otonom via headless context tanpa menghentikan server atau merepotkan pengguna.
 
 ---
 

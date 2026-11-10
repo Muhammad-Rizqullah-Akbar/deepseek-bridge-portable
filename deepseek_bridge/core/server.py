@@ -25,6 +25,7 @@ jadi menambah akun benar-benar menambah throughput.
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import json
 import logging
@@ -716,8 +717,23 @@ def _mark_collision(account: str, reason: str) -> None:
         log.warning("gagal mencatat bentrokan akun %s: %s", account, e)
 
 
+def _extract_jwt_exp(token: str) -> Optional[float]:
+    """Ekstraksi timestamp 'exp' dari payload JWT DeepSeek tanpa verifikasi cryptographic signature."""
+    try:
+        parts = token.split(".")
+        if len(parts) >= 2:
+            seg = parts[1]
+            seg += "=" * ((4 - len(seg) % 4) % 4)
+            data = json.loads(base64.urlsafe_b64decode(seg.encode("utf-8")))
+            exp = data.get("exp")
+            return float(exp) if exp else None
+    except Exception:
+        pass
+    return None
+
+
 def _keepalive_once(account: str) -> bool:
-    """Verifikasi dan perpanjang sesi akun secara aman via HTTP heartbeat (tanpa Playwright headless)."""
+    """Verifikasi dan perpanjang sesi akun secara aman via HTTP heartbeat & proaktif headless renewal."""
     pool = get_pool()
     acc = pool.accounts.get(account)
     if acc is None:
@@ -727,8 +743,49 @@ def _keepalive_once(account: str) -> bool:
         return False
     session = Session.load(acc.session_file)
     if session is None:
+        try:
+            from ..browser.auth import _headless_refresh
+            session = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+            if session:
+                log.info("keepalive %s: sesi baru berhasil dibuat secara otomatis dari profil browser", account)
+                _keepalive_last[account] = time.time()
+                return True
+        except Exception:
+            pass
         return False
 
+    # 1. CEK PROAKTIF: Periksa sisa umur token dari JWT exp atau usia sesi
+    now = time.time()
+    jwt_exp = _extract_jwt_exp(session.token)
+    needs_proactive_refresh = False
+    if jwt_exp is not None:
+        remaining_seconds = jwt_exp - now
+        if remaining_seconds < KEEPALIVE_BEFORE_EXPIRY:
+            log.info(
+                "keepalive %s: token JWT mendekati masa kedaluwarsa (sisa %.1f jam). Memperbarui secara proaktif...",
+                account, max(0.0, remaining_seconds / 3600.0)
+            )
+            needs_proactive_refresh = True
+    elif (now - session.captured_at) > max(3600.0, config.SESSION_MAX_AGE - KEEPALIVE_BEFORE_EXPIRY):
+        log.info(
+            "keepalive %s: usia sesi mendekati batas maksimum (%d hari). Memperbarui secara proaktif...",
+            account, int(config.SESSION_MAX_AGE / 86400)
+        )
+        needs_proactive_refresh = True
+
+    if needs_proactive_refresh:
+        try:
+            from ..browser.auth import _headless_refresh
+            new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+            if new_s:
+                session = new_s
+                _keepalive_last[account] = now
+                log.info("keepalive %s: token berhasil diperbarui secara proaktif via profil browser", account)
+                return True
+        except Exception as ref_err:
+            log.warning("keepalive %s: refresh proaktif gagal (%s), melanjutkan probe HTTP...", account, ref_err)
+
+    # 2. HTTP PROBE RINGAN (curl_cffi impersonate chrome120)
     try:
         from curl_cffi import requests as cffi_requests
         headers = {
@@ -768,11 +825,29 @@ def _keepalive_once(account: str) -> bool:
                 pool.mark_challenge(acc, config.CHALLENGE_COOLDOWN_SECONDS)
                 return False
             elif code == 40003 or "INVALID_TOKEN" in str(data.get("msg", "")):
-                log.warning("keepalive %s: token kedaluwarsa atau ditolak (40003)", account)
+                log.warning("keepalive %s: token kedaluwarsa (40003). Memulihkan via headless refresh...", account)
                 discard_rejected_session(acc)
+                try:
+                    from ..browser.auth import _headless_refresh
+                    new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+                    if new_s:
+                        _keepalive_last[account] = time.time()
+                        log.info("keepalive %s: sesi berhasil dipulihkan secara otomatis dengan token baru", account)
+                        return True
+                except Exception as ref_err:
+                    log.warning("keepalive %s: pemulihan otomatis gagal (%s)", account, ref_err)
                 return False
         elif r.status_code == 202 or r.headers.get("x-amzn-waf-action") == "challenge":
-            log.warning("keepalive %s: terhadang AWS WAF challenge", account)
+            log.warning("keepalive %s: terhadang AWS WAF challenge. Memperbarui clearance cookie via headless...", account)
+            try:
+                from ..browser.auth import _headless_refresh
+                new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+                if new_s:
+                    _keepalive_last[account] = time.time()
+                    log.info("keepalive %s: cookie WAF berhasil diperbarui via headless", account)
+                    return True
+            except Exception as ref_err:
+                log.warning("keepalive %s: pembaruan cookie WAF gagal (%s)", account, ref_err)
             return False
         else:
             log.warning("keepalive %s: HTTP probe mengembalikan status %d", account, r.status_code)
