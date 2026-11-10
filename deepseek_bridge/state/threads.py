@@ -129,27 +129,49 @@ def profile_system_prompt(profile: str, max_chars: int = 0) -> str:
     return gabung
 
 
+def _role_of(m) -> str:
+    """Ambil role dari pesan (baik model Pydantic ChatMessage maupun dict)."""
+    if isinstance(m, dict):
+        return str(m.get("role") or "")
+    return str(getattr(m, "role", None) or "")
+
+
+def _content_of(m):
+    """Ambil content mentah dari pesan (baik model Pydantic ChatMessage maupun dict)."""
+    if isinstance(m, dict):
+        return m.get("content")
+    return getattr(m, "content", None)
+
+
 def _content_text(content) -> str:
     """Teks dari content pesan, apa pun bentuknya.
 
-    Content bisa berupa string, atau list blok seperti
-    [{"type": "text", "text": "..."}] pada format OpenAI yang lebih baru.
+    Content bisa berupa string, int/float/bool, dict {"text": "..."}, atau list blok
+    seperti [{"type": "text", "text": "..."}] pada format OpenAI.
     Bentuk lain dikembalikan sebagai string kosong supaya pemanggil tidak
     perlu memeriksa tipe satu per satu.
     """
+    if content is None:
+        return ""
     if isinstance(content, str):
         return content
-    if isinstance(content, list):
+    if isinstance(content, (int, float, bool)):
+        return str(content)
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "")
+    if isinstance(content, (list, tuple)):
         parts = []
         for blok in content:
             if isinstance(blok, dict):
                 t = blok.get("text")
                 if isinstance(t, str):
                     parts.append(t)
+                elif "content" in blok:
+                    parts.append(str(blok["content"]))
             elif isinstance(blok, str):
                 parts.append(blok)
         return "\n".join(parts)
-    return ""
+    return str(content)
 
 
 def profile_from_messages(messages) -> str:
@@ -306,9 +328,9 @@ def last_assistant_text(messages: List) -> str:
     diperiksa. Balasan seperti itu tidak punya teks untuk disidik, jadi
     pencocokan jatuh ke sidik lain yang tersedia.
     """
-    for m in reversed(messages):
-        if getattr(m, "role", None) == "assistant":
-            return _content_text(m.content)
+    for m in reversed(messages or []):
+        if _role_of(m) == "assistant":
+            return _content_text(_content_of(m))
     return ""
 
 
@@ -320,10 +342,10 @@ def tool_call_marker(messages: List) -> str:
     pesan tool. Turn-turn itu tidak membawa teks assistant, jadi tanpa
     sidik ini percakapan akan diputus tepat di tengah alur perkakas.
     """
-    for m in reversed(messages):
-        if getattr(m, "role", None) != "assistant":
+    for m in reversed(messages or []):
+        if _role_of(m) != "assistant":
             continue
-        calls = getattr(m, "tool_calls", None)
+        calls = m.get("tool_calls") if isinstance(m, dict) else getattr(m, "tool_calls", None)
         if not calls:
             return ""
         parts = []
@@ -343,10 +365,10 @@ def tool_call_marker(messages: List) -> str:
 
 def tool_result_marker(messages: List) -> str:
     """Sidik dari pesan tool terakhir, dipakai saat hasil perkakas dikirim."""
-    for m in reversed(messages):
-        if getattr(m, "role", None) == "tool":
-            cid = getattr(m, "tool_call_id", None) or ""
-            text = _content_text(m.content)[:MARKER_CHARS]
+    for m in reversed(messages or []):
+        if _role_of(m) == "tool":
+            cid = (m.get("tool_call_id") if isinstance(m, dict) else getattr(m, "tool_call_id", None)) or ""
+            text = _content_text(_content_of(m))[:MARKER_CHARS]
             if not cid and not text:
                 return ""
             return _digest(f"{cid}|{text}")
@@ -408,10 +430,10 @@ def first_user_text(messages: List) -> str:
     system tidak pernah dianggap pembuka karena itu instruksi, bukan
     percakapan.
     """
-    for m in messages:
-        if getattr(m, "role", None) != "user":
+    for m in (messages or []):
+        if _role_of(m) != "user":
             continue
-        text = _content_text(m.content).strip()
+        text = _content_text(_content_of(m)).strip()
         if text:
             return text
     return ""
@@ -435,23 +457,11 @@ def session_title(messages: List, limit: int = 70) -> str:
 
 def last_user_text(messages: List) -> str:
     """Ambil teks pesan user paling akhir dari daftar messages."""
-    for m in reversed(messages):
-        if getattr(m, "role", None) != "user":
+    for m in reversed(messages or []):
+        if _role_of(m) != "user":
             continue
-        return _content_text(m.content)
+        return _content_text(_content_of(m))
     return ""
-
-
-def _content_text(content) -> str:
-    if content is None:
-        return ""
-    if isinstance(content, str):
-        return content
-    parts = []
-    for p in content:
-        if isinstance(p, dict) and p.get("type") == "text":
-            parts.append(p.get("text", ""))
-    return "\n".join(parts)
 
 
 def delta_turns(messages: List) -> str:
@@ -467,8 +477,8 @@ def delta_turns(messages: List) -> str:
     memang informasi baru yang harus sampai ke model.
     """
     tail: List = []
-    for m in reversed(messages):
-        role = getattr(m, "role", None)
+    for m in reversed(messages or []):
+        role = _role_of(m)
         if role == "assistant":
             break
         tail.append(m)
@@ -476,13 +486,14 @@ def delta_turns(messages: List) -> str:
     parts: List[str] = []
     has_tool_result = False
     for m in tail:
-        role = getattr(m, "role", None)
-        text = _content_text(m.content).strip()
+        role = _role_of(m)
+        text = _content_text(_content_of(m)).strip()
         if not text:
             continue
         if role == "tool":
             has_tool_result = True
-            parts.append(f"Hasil perkakas {getattr(m, 'name', None) or ''}:\n{text}")
+            name = m.get("name") if isinstance(m, dict) else getattr(m, "name", None)
+            parts.append(f"Hasil perkakas {name or ''}:\n{text}")
         elif role == "user":
             parts.append(text)
     if not parts:
@@ -500,8 +511,8 @@ def delta_turns(messages: List) -> str:
 
 def system_text(messages: List) -> str:
     """Gabungkan seluruh pesan system menjadi satu blok."""
-    parts = [_content_text(m.content) for m in messages
-             if getattr(m, "role", None) == "system"]
+    parts = [_content_text(_content_of(m)) for m in (messages or [])
+             if _role_of(m) == "system"]
     return "\n\n".join(p for p in parts if p.strip())
 
 
@@ -603,11 +614,11 @@ def bootstrap_prompt(messages: List, limit: int = BOOTSTRAP_MAX_CHARS,
     """Payload turn pertama: system prompt Hermes utuh plus transkrip."""
     sys_text = system_text(messages).strip()
     body: List[str] = []
-    for m in messages:
-        role = getattr(m, "role", None)
+    for m in (messages or []):
+        role = _role_of(m)
         if role == "system":
             continue
-        text = _content_text(getattr(m, "content", None)).strip()
+        text = _content_text(_content_of(m)).strip()
         if not text:
             continue
         label = {"user": "User", "assistant": "Assistant",

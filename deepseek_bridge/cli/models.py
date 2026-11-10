@@ -12,7 +12,7 @@ from ..core import config
 
 
 def _get_models_file() -> Path:
-    p = getattr(config, "MODELS_FILE", config.ROOT / "session" / "models.json")
+    p = Path(getattr(config, "MODELS_FILE", getattr(config, "SESSION_BASE", config.ROOT / "session") / "models.json"))
     p.parent.mkdir(parents=True, exist_ok=True)
     return p
 

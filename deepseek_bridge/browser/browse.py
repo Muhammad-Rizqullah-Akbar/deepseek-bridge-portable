@@ -335,9 +335,10 @@ def run_browse(account_name: str) -> int:
                                             token_captured = True
                                             try:
                                                 import urllib.request
-                                                req = urllib.request.Request("http://127.0.0.1:8787/admin/reload", data=b"")
+                                                port = getattr(config, "PORT", 8787)
+                                                req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/reload", data=b"")
                                                 urllib.request.urlopen(req, timeout=1.0)
-                                                log.info("Sinyal reload terkirim ke server bridge.")
+                                                log.info("Sinyal reload terkirim ke server bridge (port %s).", port)
                                             except Exception:
                                                 pass
                                         break

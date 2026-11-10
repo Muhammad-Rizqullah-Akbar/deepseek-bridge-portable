@@ -74,29 +74,32 @@ def scan_profiles() -> Dict[str, Profil]:
     # 2. Sub-Profil di folder profiles/
     profiles_dir = get_hermes_profiles_dir()
     if profiles_dir.exists() and profiles_dir.is_dir():
-        for item in profiles_dir.iterdir():
-            if not item.is_dir() or item.name.startswith("."):
-                continue
+        try:
+            for item in profiles_dir.iterdir():
+                if not item.is_dir() or item.name.startswith("."):
+                    continue
 
-            name = item.name
-            desc = KNOWN_DESCRIPTIONS.get(name, "Dynamic Hermes Agent Profile")
+                name = item.name
+                desc = KNOWN_DESCRIPTIONS.get(name, "Dynamic Hermes Agent Profile")
 
-            # Cek apakah ada deskripsi di profile.yaml
-            profile_yaml = item / "profile.yaml"
-            if profile_yaml.exists():
-                try:
-                    for line in profile_yaml.read_text(encoding="utf-8").splitlines():
-                        if line.startswith("description:"):
-                            desc = line.split(":", 1)[1].strip().strip('"\'')
-                            break
-                except Exception:
-                    pass
+                # Cek apakah ada deskripsi di profile.yaml
+                profile_yaml = item / "profile.yaml"
+                if profile_yaml.exists():
+                    try:
+                        for line in profile_yaml.read_text(encoding="utf-8").splitlines():
+                            if line.startswith("description:"):
+                                desc = line.split(":", 1)[1].strip().strip('"\'')
+                                break
+                    except Exception:
+                        pass
 
-            registry[name] = Profil(
-                nama=name,
-                peran=desc,
-                home_dir=item,
-            )
+                registry[name] = Profil(
+                    nama=name,
+                    peran=desc,
+                    home_dir=item,
+                )
+        except OSError:
+            pass
 
     return registry
 

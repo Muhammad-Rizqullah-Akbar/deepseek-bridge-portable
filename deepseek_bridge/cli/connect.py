@@ -22,7 +22,7 @@ DEFAULT_9ROUTER_PASS = "123456"
 def get_published_models() -> List[str]:
     """Ambil daftar model yang dipublikasikan dari session/models.json atau config."""
     try:
-        models_file = Path(getattr(config, "MODELS_FILE", config.ROOT / "session" / "models.json"))
+        models_file = Path(getattr(config, "MODELS_FILE", getattr(config, "SESSION_BASE", config.ROOT / "session") / "models.json"))
         if models_file.exists():
             data = json.loads(models_file.read_text(encoding="utf-8"))
             pub = data.get("published", [])

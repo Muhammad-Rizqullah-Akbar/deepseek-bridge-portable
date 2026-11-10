@@ -41,7 +41,7 @@ class Profil:
             if p.exists() and p.is_file():
                 content = p.read_text(encoding="utf-8").strip()
                 return content if content else None
-        except OSError:
+        except Exception:
             pass
         return None
 

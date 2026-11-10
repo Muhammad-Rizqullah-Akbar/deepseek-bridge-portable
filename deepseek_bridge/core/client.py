@@ -205,11 +205,11 @@ class DeepSeekError(RuntimeError):
     def is_invalid_token(self) -> bool:
         # Dua jalur pengenalan. `biz_msg` adalah jalur utama, tapi DeepSeek
         # kadang mengirim penolakan token dengan `biz_msg` kosong dan hanya
-        # menyertakan kode 40003. Kalau hanya mengandalkan pesan, kasus itu
+        # menyertakan kode 40003 atau 40001. Kalau hanya mengandalkan pesan, kasus itu
         # tidak terdeteksi dan token mati dipakai ulang terus.
-        if "INVALID_TOKEN" in (self.biz_msg or ""):
+        if "INVALID_TOKEN" in (self.biz_msg or "") or "token" in (self.biz_msg or "").lower():
             return True
-        return self.biz_code == 40003
+        return self.biz_code in (40003, 40001)
 
 
 class DeepSeekChallengeRequired(DeepSeekError):
@@ -311,19 +311,27 @@ class PowPrewarmer:
 
         def worker():
             try:
-                r = client._http.post(
-                    URL_POW_CHALLENGE,
-                    json={"target_path": config.COMPLETION_PATH},
-                    timeout=12.0,
-                )
-                if r.status_code == 200 and r.content and r.content.strip():
-                    challenge = _biz(r.json()).get("challenge")
-                    if challenge:
-                        with client._pow_lock:
-                            hdr = client._pow.make_header(challenge)
-                        exp = float(challenge.get("expire_at", 0)) / 1000.0
-                        with self._lock:
-                            self._queue.append((hdr, exp))
+                while True:
+                    with self._lock:
+                        if len(self._queue) >= self.target_size:
+                            break
+                    r = client._http.post(
+                        URL_POW_CHALLENGE,
+                        json={"target_path": config.COMPLETION_PATH},
+                        timeout=12.0,
+                    )
+                    if r.status_code == 200 and r.content and r.content.strip():
+                        challenge = _biz(r.json()).get("challenge")
+                        if challenge:
+                            with client._pow_lock:
+                                hdr = client._pow.make_header(challenge)
+                            exp = float(challenge.get("expire_at", 0)) / 1000.0
+                            with self._lock:
+                                self._queue.append((hdr, exp))
+                        else:
+                            break
+                    else:
+                        break
             except Exception:
                 pass
             finally:
@@ -432,6 +440,25 @@ class DeepSeekClient:
                     except Exception as ref_err:
                         log.debug("Auto-refresh sesi saat WAF gagal: %s", ref_err)
                     raise DeepSeekError("AWS WAF Challenge aktif, sesi sedang disegarkan", transient=True)
+
+                if r.status_code == 429:
+                    retry_after = 2.0 * attempt
+                    try:
+                        ra_hdr = r.headers.get("retry-after")
+                        if ra_hdr:
+                            retry_after = max(1.0, float(ra_hdr))
+                    except (ValueError, TypeError):
+                        pass
+                    log.warning("HTTP DeepSeek 429 Rate Limit (percobaan %d/3). Menunggu %.1fs...",
+                                attempt, retry_after)
+                    time.sleep(min(retry_after, 5.0))
+                    continue
+
+                if r.status_code in (500, 502, 503, 504, 520, 521, 522, 524):
+                    log.warning("HTTP DeepSeek gateway/server error %d (percobaan %d/3)",
+                                r.status_code, attempt)
+                    time.sleep(1.0 * attempt)
+                    continue
 
                 r.raise_for_status()
                 if not r.content or not r.content.strip():
@@ -704,6 +731,13 @@ class _Stream:
             with self._client._http.stream(
                 "POST", URL_COMPLETION, json=body, headers=headers
             ) as resp:
+                # Deteksi AWS WAF Challenge pada streaming (status 202 atau header x-amzn-waf-action)
+                if resp.status_code == 202 or resp.headers.get("x-amzn-waf-action") == "challenge":
+                    raise DeepSeekError("AWS WAF Challenge aktif pada stream endpoint", transient=True)
+                if resp.status_code == 429:
+                    raise DeepSeekError("DeepSeek rate limited (429) pada completion stream", transient=True)
+                if resp.status_code in (500, 502, 503, 504, 520, 521, 522, 524):
+                    raise DeepSeekError(f"DeepSeek gateway error ({resp.status_code}) pada completion stream", transient=True)
                 # Akun yang di-mute dibalas HTTP 200 dengan badan JSON, bukan SSE.
                 # Kalau dibiarkan, parser SSE tidak menemukan teks dan request
                 # tampak sukses dengan balasan kosong. Jadi periksa lebih dulu.

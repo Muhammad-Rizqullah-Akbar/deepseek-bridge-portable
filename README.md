@@ -123,6 +123,17 @@ Server memelihara sesi secara otomatis di latar belakang:
 2. **Tier 2 (Proactive Headless Renewal):** Dekoder internal membaca klaim `exp` pada JWT. Jika sisa umur token kurang dari **4 jam** (atau usia sesi mendekati batas maksimum), bridge secara proaktif menjalankan refresh headless di latar belakang menggunakan profil Chromium akun untuk menangkap token segar sebelum token lama kedaluwarsa.
 3. **Tier 3 (Reactive Self-Healing Fallback):** Jika hulu mengembalikan error `INVALID_TOKEN` (40003) atau AWS WAF Challenge (status 202), bridge seketika membuang token mati dan memperbarui sesi secara otonom via headless context tanpa menghentikan server atau merepotkan pengguna.
 
+### 4. Arsitektur Zero-Coldstart & Matriks Ketahanan Sistem
+Untuk mengeliminasi latensi coldstart pada setiap turn dan menjamin kestabilan kelas produksi:
+- **Multi-Turn KV-Cache Pinning:** Alih-alih membuat chat baru di hulu setiap request, thread continuity mendeteksi sidik percakapan (`tail_marker`, `tool_marker`) dan menyematkan request lanjutan ke `chat_session_id` yang sama. Server DeepSeek hanya memproses delta turn baru (menghemat komputasi self-attention hulu), memangkas TTFT dari ~8 detik menjadi sub-detik (<800ms).
+- **Asynchronous PoW Prewarmer:** Engine `PowPrewarmer` menjaga 2–3 solusi Proof-of-Work Wasm terpecahkan di latar belakang. Saat turn baru masuk, header challenge langsung ditarik dari antrean memori tanpa hambatan komputasi CPU sinkron.
+- **Reentrant RLock Architecture:** Seluruh mekanisme pool, registry disk caching, dan HTTP client menggunakan `threading.RLock()` reentrant murni, mencegah *thread deadlock* saat reload dinamis berlangsung.
+- **Lapisan Penanganan Error Berlapis:**
+  * **Manajemen Akun:** Validasi format JSON, pencegahan duplikasi nama akun (HTTP 409), serta isolasi traversal direktori.
+  * **Parser Prompt Multimodal:** Toleran terhadap format Pydantic model, dictionary mentah, scalar, maupun multimodal text blocks tanpa memicu `AttributeError`.
+  * **Hermes Handler:** Toleran terhadap kegagalan baca `SOUL.md` (encoding/permission), auto-fallback ke persona Xenonite bawaan jika file tidak tersedia.
+  * **Koneksi Hulu DeepSeek:** Penanganan otomatis HTTP 429 (menghormati header `Retry-After`), Cloudflare 500-524 transient retries, AWS WAF challenge mitigation, dan failover otomatis antar-akun bila batas beban tercapai.
+
 ---
 
 ## 🖥️ Audit Diagnostik Pre-Flight

@@ -132,16 +132,16 @@ def _gate_for(account_name: Optional[str] = None) -> threading.BoundedSemaphore:
 
 # Satu klien per akun, dibuat lazy saat akun pertama kali dipakai.
 _clients: dict[str, DeepSeekClient] = {}
-_client_lock = threading.Lock()
+_client_lock = threading.RLock()
 
 # Pool akun. Kalau hanya satu akun, pool tetap jalan dan berperilaku sama
 # seperti setup satu akun biasa.
 _pool: Optional[AccountPool] = None
-_pool_init_lock = threading.Lock()
+_pool_init_lock = threading.RLock()
 
 # Registry akun, satu akun satu profil Chromium.
 _registry: Optional[AccountRegistry] = None
-_registry_lock = threading.Lock()
+_registry_lock = threading.RLock()
 
 
 def _human_age(seconds: float) -> str:
@@ -1202,18 +1202,29 @@ async def admin_account_add(request: Request):
 
     Body: {"name": "acc3", "email": "alamat@proton.me"}
     """
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return _error("Payload request harus berformat JSON yang valid.",
+                      status=400, err_type="invalid_json")
+    if not isinstance(body, dict):
+        return _error("Badan request harus berupa objek JSON.",
+                      status=400, err_type="invalid_payload")
     name = (body.get("name") or "").strip()
     if not name:
         return _error("Field 'name' wajib diisi.", status=400,
                       err_type="missing_name")
+    reg = get_registry()
+    if reg.get(name):
+        return _error(f"Akun dengan nama '{name}' sudah terdaftar dalam registry.",
+                      status=409, err_type="account_exists")
     try:
         acc = Account(
             name=name,
             email=(body.get("email") or "").strip(),
             note=(body.get("note") or "").strip(),
         )
-        get_registry().add(acc)
+        reg.add(acc)
     except AccountError as e:
         return _error(str(e), status=400, err_type="account_error")
 
@@ -1248,7 +1259,14 @@ async def admin_account_add(request: Request):
 @app.post("/admin/accounts/{name}")
 async def admin_account_update(name: str, request: Request):
     """Ubah email atau catatan satu akun."""
-    body = await request.json()
+    try:
+        body = await request.json()
+    except Exception:
+        return _error("Payload request harus berformat JSON yang valid.",
+                      status=400, err_type="invalid_json")
+    if not isinstance(body, dict):
+        return _error("Badan request harus berupa objek JSON.",
+                      status=400, err_type="invalid_payload")
     changes = {}
     for field in ("email", "note"):
         if field in body:
@@ -1362,6 +1380,12 @@ def admin_account_open(name: str):
     """
     pool = get_pool()
     acc = pool.accounts.get(name)
+    if acc is None:
+        reg = get_registry()
+        if reg.get(name):
+            _reset_pool()
+            pool = get_pool()
+            acc = pool.accounts.get(name)
     if acc is None:
         return _error(f"Akun '{name}' tidak ada.", status=404,
                       err_type="unknown_account")
@@ -1999,7 +2023,7 @@ def _thread_registry() -> thread_mod.ThreadRegistry:
     """Registry thread global, dibuat sekali per proses."""
     global _THREADS
     if _THREADS is None:
-        _THREADS = thread_mod.ThreadRegistry(config.ROOT / "session")
+        _THREADS = thread_mod.ThreadRegistry(config.SESSION_BASE)
     return _THREADS
 
 
@@ -3110,9 +3134,10 @@ async def _run_completion(req: ChatCompletionRequest,
                     break
                 if nudge_reply and nudge_reply.text:
                     reply = nudge_reply
-                    _remember_thread(req, account, plan,
+                    _remember_thread(account.name, plan,
                                      reply.conversation_id,
-                                     getattr(reply, "message_id", None))
+                                     req,
+                                     getattr(reply, "text", None))
                     n_clean, n_calls, n_broken = parse_tool_calls(reply.text)
                     n_calls, n_dropped = validate_tool_calls(n_calls)
                     if n_calls:
@@ -3567,16 +3592,29 @@ _ROLE_LABELS = {"system": "System", "user": "User", "assistant": "Assistant"}
 
 
 def _text_of(content) -> str:
-    """Ambil teks polos dari content pesan (string atau list-of-parts)."""
+    """Ambil teks polos dari content pesan (string, dict, scalar, atau list-of-parts)."""
     if content is None:
         return ""
     if isinstance(content, str):
         return content
-    parts = []
-    for p in content:
-        if isinstance(p, dict) and p.get("type") == "text":
-            parts.append(p.get("text", ""))
-    return "\n".join(parts)
+    if isinstance(content, (int, float, bool)):
+        return str(content)
+    if isinstance(content, dict):
+        return str(content.get("text") or content.get("content") or "")
+    if isinstance(content, (list, tuple)):
+        parts = []
+        for p in content:
+            if isinstance(p, dict):
+                if p.get("type") == "text":
+                    parts.append(str(p.get("text") or ""))
+                elif "text" in p:
+                    parts.append(str(p["text"]))
+                elif p.get("type") == "image_url":
+                    parts.append("[image]")
+            elif isinstance(p, str):
+                parts.append(p)
+        return "\n".join(parts)
+    return str(content)
 
 
 def messages_to_prompt(messages: List) -> str:
