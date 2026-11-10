@@ -63,7 +63,9 @@ MAX_TOOLS = 48
 CORE_ESSENTIAL_TOOLS = {
     "terminal", "read_file", "write_file", "patch", "search_files",
     "execute_code", "web_search", "web_extract", "memory", "delegate_task",
-    "clarify", "session_search", "skill_view", "skill_manage", "process_manage"
+    "clarify", "session_search", "skill_view", "skill_manage", "skills_list",
+    "process_manage", "tool_search", "tool_describe", "tool_call",
+    "browser_exec", "manage_connections",
 }
 
 
@@ -176,6 +178,7 @@ def build_tool_instructions(tools: Optional[List[dict]], query: Optional[str] = 
         "   </tool_call>",
         "",
         "   Untuk batch execution (menjalankan beberapa tools sekaligus), Anda dapat menuliskan beberapa baris panggilan di dalam blok pemanggilan.",
+        "   Catatan Deferred/MCP Tools: Tools eksternal/MCP yang ditemukan via `tool_search` (mis. `mcp__fsociety__*`) dapat dipanggil melalui `tool_call(calls=[{\"name\": \"...\", \"arguments\": {...}}])` maupun langsung dengan nama tool-nya.",
         "",
         "Daftar tools yang tersedia:",
     ]
@@ -967,21 +970,50 @@ _TOOL_REQUIRED_FIELDS = {
     "web_extract": ("urls",),
     "clarify": ("questions",),
     "process_manage": ("action",),
+    "tool_search": ("query",),
+    "tool_describe": ("tools",),
+    "tool_call": ("calls",),
 }
 
 
-def validate_tool_calls(calls: List[Tuple[str, dict]]) -> Tuple[List[Tuple[str, dict]], List[str]]:
-    """Buang tool call yang tidak punya field wajib.
+def validate_tool_calls(
+    calls: List[Tuple[str, dict]],
+    tools: Optional[List[dict]] = None,
+) -> Tuple[List[Tuple[str, dict]], List[str]]:
+    """Validasi parameter wajib dan rutekan deferred/MCP tools secara otomatis.
 
-    Mengembalikan (tool_call_sah, daftar_alasan_buang). Tool call tanpa nama,
-    dengan argumen bukan dict, atau tanpa field wajib perkakasnya dibuang.
-    Alasan dicatat supaya kegagalan atributabel ke perkakas mana, bukan
-    hilang tanpa jejak.
-
-    Read-only terhadap masukan: daftar baru, dict argumen tidak dimutasi.
+    Mengembalikan (tool_call_sah, daftar_alasan_buang).
+    Jika `tools` (daftar skema OpenAI dari Hermes) disertakan:
+      1. Parameter `required` dibaca secara dinamis dari skema masing-masing tool.
+      2. Jika `tool_call` tersedia di daftar `tools` (sistem deferred tools Hermes)
+         dan model memanggil tool `mcp__*` atau deferred tool lain secara langsung
+         (yang tidak ada di top-level `tools`), bridge otomatis membungkusnya ke
+         dalam `tool_call(calls=[{"name": ..., "arguments": ...}])` sehingga
+         Hermes mengeksekusinya secara native tanpa error "Tool does not exist".
     """
+    top_level_names: set[str] = set()
+    dynamic_required: dict[str, Tuple[str, ...]] = {}
+    if tools:
+        for t in tools:
+            if not isinstance(t, dict):
+                continue
+            fn = t.get("function", t)
+            if not isinstance(fn, dict):
+                continue
+            t_name = str(fn.get("name") or "").strip()
+            if not t_name:
+                continue
+            top_level_names.add(t_name)
+            params = fn.get("parameters") or {}
+            req_list = params.get("required") if isinstance(params, dict) else None
+            if isinstance(req_list, list) and req_list:
+                dynamic_required[t_name] = tuple(str(r) for r in req_list)
+
+    has_deferred_invoker = "tool_call" in top_level_names
     valid: List[Tuple[str, dict]] = []
+    deferred_batch: List[dict] = []
     dropped: List[str] = []
+
     for name, payload in calls:
         if not name or not isinstance(name, str):
             dropped.append(f"unnamed_tool:{name!r}")
@@ -989,13 +1021,44 @@ def validate_tool_calls(calls: List[Tuple[str, dict]]) -> Tuple[List[Tuple[str, 
         if not isinstance(payload, dict):
             dropped.append(f"{name}:args_not_dict")
             continue
-        required = _TOOL_REQUIRED_FIELDS.get(name)
+
+        # Normalisasi jika model memanggil tool_call dengan objek tunggal {"name": ..., "arguments": ...}
+        if name == "tool_call" and "calls" not in payload and ("name" in payload or "tool" in payload):
+            sub_name = payload.get("name") or payload.get("tool")
+            sub_args = payload.get("arguments") or payload.get("input") or {
+                k: v for k, v in payload.items() if k not in ("name", "tool", "arguments", "input")
+            }
+            if isinstance(sub_name, str) and sub_name.strip():
+                payload = {"calls": [{"name": sub_name.strip(), "arguments": sub_args if isinstance(sub_args, dict) else {}}]}
+
+        # Auto-wrap jika model memanggil deferred/MCP tool secara langsung (mis. mcp__fsociety__*)
+        if (
+             (top_level_names and has_deferred_invoker and name not in top_level_names)
+            or (name.startswith("mcp__") and (not top_level_names or name not in top_level_names))
+        ):
+            deferred_batch.append({"name": name, "arguments": payload})
+            continue
+
+        required = dynamic_required.get(name) or _TOOL_REQUIRED_FIELDS.get(name)
         if required:
             missing = [f for f in required if f not in payload or payload[f] in (None, "")]
             if missing:
                 dropped.append(f"{name}:missing={','.join(missing)}")
                 continue
         valid.append((name, payload))
+
+    if deferred_batch:
+        # Jika sudah ada panggilan tool_call di valid, gabungkan ke dalamnya agar efisien
+        merged = False
+        for idx, (v_name, v_payload) in enumerate(valid):
+            if v_name == "tool_call" and isinstance(v_payload.get("calls"), list):
+                new_calls = list(v_payload["calls"]) + deferred_batch
+                valid[idx] = ("tool_call", {**v_payload, "calls": new_calls})
+                merged = True
+                break
+        if not merged:
+            valid.append(("tool_call", {"calls": deferred_batch}))
+
     return valid, dropped
 
 
@@ -1021,55 +1084,37 @@ def to_tool_calls(calls: List[Tuple[str, dict]]) -> List[dict]:
 
 
 def tool_names_note(tools: Optional[List[dict]]) -> str:
-    """Daftar nama perkakas saja, tanpa deskripsi dan tanpa blok format.
-
-    Dipakai pada turn lanjutan ketika kumpulan perkakas berubah. Blok
-    instruksi format sudah diajarkan di turn pertama, jadi mengulanginya
-    tiap request hanya menambah panjang payload tanpa informasi baru.
-    """
+    """Daftar nama tools saja, tanpa deskripsi dan tanpa blok format."""
     if not tools:
         return ""
     names = []
     selected, _ = select_relevant_tools(tools, max_tools=MAX_TOOLS)
     for t in selected:
         fn = t.get("function", t) if isinstance(t, dict) else {}
-        name = fn.get("name") or "perkakas"
+        name = fn.get("name") or "tool"
         names.append(str(name))
     if not names:
         return ""
-    return "Perkakas yang tersedia sekarang: " + ", ".join(names) + "."
+    return "Tools yang tersedia sekarang: " + ", ".join(names) + "."
 
 
 def build_tool_prompt(prompt: str, tools: Optional[List[dict]]) -> str:
-    """Gabungkan instruksi perkakas dengan prompt asli.
-
-    Urutan penting. Instruksi perkakas ditaruh SETELAH prompt asli, bukan
-    sebelumnya. Prompt asli sudah membawa blok identitas di posisi awal,
-    jadi kalau instruksi perkakas ditempel di depan, identitas tersaingi
-    dan model keluar dari karakter.
-
-    Instruksi perkakas juga diberi batas tegas: ia hanya mengatur format
-    pemanggilan, tidak mengubah identitas, gaya, maupun bahasa.
-    """
+    """Gabungkan instruksi tools dengan prompt asli."""
     instructions = build_tool_instructions(tools, query=prompt)
     if not instructions:
         return prompt
-    # Prompt yang masuk sudah berakhir dengan penanda "Assistant:". Instruksi
-    # perkakas disisipkan SEBELUM penanda itu, bukan sesudah, supaya posisi
-    # respons tetap jadi hal terakhir yang dilihat model. Kalau disisipkan
-    # sesudah, aturan perkakas justru menempati posisi respons.
     marker = "Assistant:"
     cut = prompt.rfind(marker)
     if cut == -1:
         return (
             f"{prompt}\n\n"
             f"{'=' * 60}\n"
-            "ATURAN FORMAT PERKAKAS. BERLAKU HANYA UNTUK FORMAT PEMANGGILAN.\n"
+            "ATURAN FORMAT TOOLS. BERLAKU HANYA UNTUK FORMAT PEMANGGILAN.\n"
             f"{'=' * 60}\n\n"
             f"{instructions}\n\n"
             "Batasan tegas: aturan di atas TIDAK mengubah identitas, gaya bicara,\n"
             "bahasa, maupun sikap yang ditetapkan di awal prompt. Identitas itu\n"
-            "tetap menang. Kalau tidak sedang memanggil perkakas, jawab murni\n"
+            "tetap menang. Kalau tidak sedang memanggil tools, jawab murni\n"
             "sebagai identitas tersebut.\n\n"
             f"{marker}"
         )
@@ -1078,12 +1123,12 @@ def build_tool_prompt(prompt: str, tools: Optional[List[dict]]) -> str:
     return (
         f"{head}\n"
         f"{'=' * 60}\n"
-        "ATURAN FORMAT PERKAKAS. BERLAKU HANYA UNTUK FORMAT PEMANGGILAN.\n"
+        "ATURAN FORMAT TOOLS. BERLAKU HANYA UNTUK FORMAT PEMANGGILAN.\n"
         f"{'=' * 60}\n\n"
         f"{instructions}\n\n"
         "Batasan tegas: aturan di atas TIDAK mengubah identitas, gaya bicara,\n"
         "bahasa, maupun sikap yang ditetapkan di awal prompt. Identitas itu\n"
-        "tetap menang. Kalau tidak sedang memanggil perkakas, jawab murni\n"
+        "tetap menang. Kalau tidak sedang memanggil tools, jawab murni\n"
         "sebagai identitas tersebut.\n\n"
         f"{marker}"
     )

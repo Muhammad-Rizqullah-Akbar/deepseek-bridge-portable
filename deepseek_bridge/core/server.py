@@ -2051,11 +2051,9 @@ def _account_dirs(names: Iterable[str]) -> dict:
     return {n: config.account_dir(n) for n in names}
 
 
-def _collect_delta(frame: str, acc: List[str]) -> None:
-    """Kumpulkan potongan teks dari satu frame SSE untuk sidik balasan."""
-    if acc is None or not isinstance(frame, str):
-        return
-    if not frame.startswith("data: "):
+def _collect_delta(frame: str, acc: List[str], tool_calls_acc: Optional[List[dict]] = None) -> None:
+    """Kumpulkan potongan teks dan tool_calls dari satu frame SSE untuk sidik balasan."""
+    if not isinstance(frame, str) or not frame.startswith("data: "):
         return
     try:
         obj = json.loads(frame[6:])
@@ -2063,8 +2061,10 @@ def _collect_delta(frame: str, acc: List[str]) -> None:
         return
     for choice in obj.get("choices") or []:
         delta = choice.get("delta") or {}
-        if delta.get("content"):
+        if acc is not None and delta.get("content"):
             acc.append(delta["content"])
+        if tool_calls_acc is not None and isinstance(delta.get("tool_calls"), list):
+            tool_calls_acc.extend(delta["tool_calls"])
 
 
 def _strip_think(text: Optional[str]) -> str:
@@ -2160,27 +2160,28 @@ def _repair_parent_cid(client: DeepSeekClient, cid: Optional[str]) -> Optional[s
 
 
 def _build_fresh_bootstrap_prompt(req: ChatCompletionRequest, profile: str = "") -> str:
-    """Bangun prompt bootstrap turn pertama lengkap dengan SOUL.md dan instruksi perkakas."""
+    """Bangun prompt bootstrap turn pertama lengkap dengan SOUL.md, system prompt Hermes, dan instruksi tools tanpa duplikasi."""
     tools_block = build_tool_instructions(req.tools)
     budget = max(400, config.BOOTSTRAP_TOTAL_CHARS - len(tools_block) - 200)
-    prompt = build_tool_prompt(
-        thread_mod.bootstrap_prompt(
-            req.messages, config.BOOTSTRAP_MAX_CHARS, budget
-        ),
-        req.tools,
+    base_prompt = thread_mod.bootstrap_prompt(
+        req.messages, config.BOOTSTRAP_MAX_CHARS, budget
     )
     if config.PROFILE_STAMP_ENABLED and profile:
         from ..cognitive import resurgence
         prinsip = resurgence.get_prinsip_prompt(profile)
-        identitas = thread_mod.profile_system_prompt(profile)
+        identitas = thread_mod.profile_system_prompt(profile, include_prinsip=False)
         if not identitas:
             identitas = thread_mod.profile_stamp(
                 profile, config.PROFILE_STAMP_MAX_CHARS
             )
-        if identitas:
-            prompt = f"{prinsip}\n\n{identitas}\n\n{prompt}"
+        if identitas and identitas[:200] not in base_prompt:
+            combined = f"{prinsip}\n\n{identitas}\n\n{base_prompt}"
         else:
-            prompt = f"{prinsip}\n\n{prompt}"
+            combined = f"{prinsip}\n\n{base_prompt}"
+        base_prompt = thread_mod.dedupe_blocks(combined)
+    prompt = build_tool_prompt(base_prompt, req.tools)
+    from ..cognitive import resurgence
+    prompt = resurgence.neutralize_ingress_prompt(prompt, profile)
     pagar = config.profile_payload_max_chars()
     return thread_mod.clamp_prompt(prompt, pagar)
 
@@ -2257,12 +2258,21 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
             # dan dua topik tercampur dalam satu chat DeepSeek. Sesi aktif
             # hanya dipakai ketika tidak ada sidik sama sekali, yaitu pada
             # klien yang tidak mengirim ulang riwayat.
-            # Hanya cocokkan sidik assistant dan perkakas yang valid
-            for field, marker in (
+            # Hanya cocokkan sidik assistant, tools, dan pembuka sesi lanjutan yang valid
+            has_continuation = any(
+                thread_mod._role_of(m) in ("assistant", "tool")
+                for m in (req.messages or [])
+            )
+            markers_to_try = [
                 ("tail_marker", thread_mod.tail_marker(req.messages)),
                 ("tool_marker", thread_mod.tool_call_marker(req.messages)),
                 ("tool_marker", thread_mod.tool_result_marker(req.messages)),
-            ):
+            ]
+            if has_continuation:
+                markers_to_try.append(
+                    ("first_user_marker", thread_mod.first_user_marker(req.messages))
+                )
+            for field, marker in markers_to_try:
                 if not marker:
                     continue
                 store, tkey, rec = _thread_registry().find_any(
@@ -2278,102 +2288,25 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
         delta = thread_mod.delta_turns(req.messages)
         prompt = delta or thread_mod.last_user_text(req.messages)
         if req.tools:
-            # Selalu sematkan instruksi perkakas dan format pemanggilan (OK_TOOL_CALL_START).
-            # Karena batas payload sekarang 2.200.000 karakter, menyertakan instruksi perkakas
-            # (~1.500 karakter) di setiap turn menjamin model TIDAK PERNAH lupa atau berhalusinasi
-            # bahwa ia tidak memiliki kanal tool call ke filesystem!
             tools_block = build_tool_instructions(req.tools, query=prompt)
             if tools_block:
                 prompt = f"{prompt}\n\n{tools_block}"
-        # Identitas profil dikirim ULANG setiap turn, bukan hanya turn
-        # pertama. Turn lanjutan hanya mengirim pesan baru karena riwayat
-        # dipegang DeepSeek di chat session, jadi tanpa pengiriman ulang
-        # model tidak pernah melihat identitasnya dan bisa menyimpang ke
-        # peran profil lain.
-        #
-        # Isinya SOUL.md lengkap milik profil, bukan pengingat ringkas.
-        # Beban SOUL.md Elliot 6137 karakter, sekitar 2045 token, hanya
-        # 0,23% dari CONTEXT_LENGTH, jadi pengiriman ulang setiap turn
-        # sangat murah. Kalau SOUL.md tidak bisa dibaca, baru jatuh ke
-        # penanda ringkas supaya model tetap tahu profilnya.
         if config.PROFILE_STAMP_ENABLED and profile:
-            from ..cognitive import resurgence
-            prinsip = resurgence.get_prinsip_prompt(profile)
-            identitas = thread_mod.profile_system_prompt(profile)
-            if not identitas:
-                identitas = thread_mod.profile_stamp(
-                    profile, config.PROFILE_STAMP_MAX_CHARS)
-            if identitas:
-                prompt = f"{prinsip}\n\n{identitas}\n\n{prompt}"
-            else:
-                prompt = f"{prinsip}\n\n{prompt}"
+            anchor = thread_mod.profile_delta_anchor(profile)
+            if anchor:
+                prompt = f"{anchor}\n\n{prompt}"
         from ..cognitive import resurgence
         prompt = resurgence.neutralize_ingress_prompt(prompt, profile)
-        # Pagar payload turn lanjutan. Dasar perhitungan pecahan dari
-        # CONTEXT_LENGTH, bukan MAX_PROMPT_CHARS, supaya payload tidak pernah
-        # mendekati batas token input sungguhan.
         pagar = config.profile_payload_max_chars()
         prompt = thread_mod.clamp_prompt(prompt, pagar)
         return TurnPlan(prompt, legacy_chars, None, [store.account_name],
                         thread_key=tkey, store=store, rec=rec, reused=True)
 
-    # Pagar terhadap fragmentasi. Yang ditahan adalah request tanpa
-    # riwayat assistant yang pesan pembukanya mirip pesan yang sudah ada,
-    # yaitu pola pesan approval Hermes yang berulang dengan variasi kecil.
-    # Request tanpa riwayat yang isinya benar-benar topik baru dibiarkan
-    # membuka thread sendiri, karena menahannya akan membuat dua topik
-    # tercampur dalam satu chat. Request yang membawa riwayat assistant
-    # sudah ditangani di atas lewat pencocokan sidik.
-    # Sesi baru tanpa riwayat assistant selalu membuat percakapan bersih
-    # agar konteks topik tidak tercampur atau berulang-ulang.
-
-    # Percakapan baru. Nama thread diturunkan dari pesan pertama supaya
-    # dua sesi berbeda milik key yang sama tidak saling menimpa, dan supaya
-    # sesi yang sama tetap mendapat nama yang sama kalau record hilang.
     if not tkey:
         seed = (thread_mod.marker_from_text(thread_mod.first_user_text(req.messages))
                 or uuid.uuid4().hex[:8])
         tkey = f"{owner}:{seed[:8]}"
-    # Turn pertama juga memakai bootstrap ringkas. Kalau tidak, turn pertama
-    # mengirim seluruh riwayat klien plus blok identitas utuh, dan itulah
-    # payload besar yang terlihat seperti prompt suntikan.
-    # Instruksi perkakas tidak ikut dipangkas oleh pagar total, karena
-    # format pemanggilan yang terpotong membuat tool call gagal total.
-    # Karena itu pagar total dipakai lebih ketat dari pada jumlah akhir,
-    # menyisakan ruang untuk blok instruksi perkakas.
-    tools_block = build_tool_instructions(req.tools)
-    budget = max(400, config.BOOTSTRAP_TOTAL_CHARS - len(tools_block) - 200)
-    prompt = build_tool_prompt(
-        thread_mod.bootstrap_prompt(req.messages, config.BOOTSTRAP_MAX_CHARS,
-                                    budget),
-        req.tools)
-    # Identitas profil dipasang juga di turn pertama.
-    #
-    # bootstrap_prompt hanya membaca pesan system yang dikirim klien. Hermes
-    # mengirim system prompt lewat _cached_system_prompt, dan kalau itu kosong
-    # tidak ada pesan system sama sekali. Tanpa blok ini, turn pertama
-    # berjalan tanpa identitas dan model menyimpang ke peran bawaan, misalnya
-    # menyebut dirinya DeepSeek. Turn lanjutan sudah mendapat identitas di
-    # jalur `if rec:` di atas, jadi ketidakseimbangan ini hanya terlihat di
-    # turn pertama.
-    #
-    # Isinya SOUL.md lengkap milik profil. Kalau SOUL.md tidak bisa dibaca,
-    # baru jatuh ke penanda ringkas.
-    if config.PROFILE_STAMP_ENABLED and profile:
-        from ..cognitive import resurgence
-        prinsip = resurgence.get_prinsip_prompt(profile)
-        identitas = thread_mod.profile_system_prompt(profile)
-        if not identitas:
-            identitas = thread_mod.profile_stamp(
-                profile, config.PROFILE_STAMP_MAX_CHARS)
-        if identitas:
-            prompt = f"{prinsip}\n\n{identitas}\n\n{prompt}"
-        else:
-            prompt = f"{prinsip}\n\n{prompt}"
-    from ..cognitive import resurgence
-    prompt = resurgence.neutralize_ingress_prompt(prompt, profile)
-    pagar = config.profile_payload_max_chars()
-    prompt = thread_mod.clamp_prompt(prompt, pagar)
+    prompt = _build_fresh_bootstrap_prompt(req, profile)
     return TurnPlan(prompt, legacy_chars, config.resolve_model_type(req.model),
                     None, thread_key=tkey, store=store)
 
@@ -2381,13 +2314,13 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
 def _remember_thread(account_name: str, plan: TurnPlan,
                      conversation_id: Optional[str],
                      req: ChatCompletionRequest,
-                     reply_text: Optional[str] = None) -> None:
+                     reply_text: Optional[str] = None,
+                     outgoing_calls: Optional[List[dict]] = None) -> None:
     """Simpan atau perbarui thread setelah balasan diterima.
 
-    `tail_marker` dihitung dari balasan yang baru saja dikirim, karena
-    balasan itulah yang akan muncul sebagai pesan assistant pada request
-    berikutnya. Dengan begitu request lanjutan bisa ditemukan kembali
-    tanpa bergantung pada system prompt.
+    `tail_marker` dihitung dari balasan prosa yang baru saja dikirim, sedangkan
+    `tool_marker` dihitung dari `outgoing_calls` (panggilan tools yang baru saja
+    diproduksi model pada turn ini) agar turn berikutnya selalu terhubung (`reused=True`).
     """
     if not plan.thread_key or not conversation_id:
         return
@@ -2398,26 +2331,20 @@ def _remember_thread(account_name: str, plan: TurnPlan,
                     plan.thread_key)
         store.drop(plan.thread_key)
         return
-    rec = plan.rec or {}
+    tersimpan = store.get(plan.thread_key) or {}
+    rec = plan.rec or tersimpan or {}
     now = time.time()
-    # Sesi yang baru dibuka otomatis jadi sesi aktif, sama seperti membuka
-    # tab baru di browser: tab itu yang muncul di depan.
     if not rec.get("active"):
         store.set_active(plan.thread_key.split(":")[0], plan.thread_key)
-    # Nilai turns lama diambil dari store, bukan dari rec, karena rec bisa
-    # basi kalau thread sudah tersimpan dari request sebelumnya di proses
-    # yang sama. store.get mengembalikan None untuk thread yang belum ada,
-    # jadi hasilnya wajib diperiksa sebelum dipakai.
-    tersimpan = store.get(plan.thread_key) or {}
     turns = int(tersimpan.get("turns", 0)) + 1
     sys_text = thread_mod.system_text(req.messages)
-    # Balasan baru jadi sidik utama. Kalau turn ini tidak menghasilkan teks
-    # (misalnya balasannya hanya tool call), sidik lama dipertahankan supaya
-    # request berikutnya tetap bisa menemukan percakapan ini.
     new_marker = thread_mod.marker_from_text(reply_text)
     marker = new_marker or rec.get("tail_marker") or thread_mod.tail_marker(req.messages)
-    # Judul sesi diambil dari pesan pembuka supaya daftar sesi bisa dibaca
-    # manusia. Judul hanya ditetapkan sekali, tidak ditimpa turn lanjutan.
+    new_tool_marker = thread_mod.outgoing_tool_marker(outgoing_calls)
+    tool_m = (new_tool_marker
+              or thread_mod.tool_call_marker(req.messages)
+              or rec.get("tool_marker")
+              or "")
     first_user = thread_mod.first_user_text(req.messages)
     title = (rec.get("title")
              or (thread_mod.session_title(req.messages) if first_user else ""))
@@ -2429,19 +2356,11 @@ def _remember_thread(account_name: str, plan: TurnPlan,
         title=title,
         first_user_text=first_user[:400] if first_user else "",
         tail_marker=marker,
-        tool_marker=(thread_mod.tool_call_marker(req.messages)
-                     or rec.get("tool_marker") or ""),
+        tool_marker=tool_m,
         user_marker=(thread_mod.user_marker(req.messages)
                      or rec.get("user_marker") or ""),
         first_user_marker=(thread_mod.first_user_marker(req.messages)
                            or rec.get("first_user_marker") or ""),
-        # model_type selalu dihitung ulang dari nama model request, tidak
-        # pernah diambil dari rekaman lama. Sebelum patch ini baris ini memakai
-        # `rec.get("model_type") or resolve_model_type(...)`, dan karena
-        # `store.put` memakai `rec.update`, nilai warisan bertahan selamanya.
-        # Akibatnya thread yang lahir sebelum MODEL_MAP diperbaiki tetap
-        # tercatat `expert` padahal server menjalankan `default`, dan bridge
-        # mengira memakai model yang tidak pernah dipakai.
         model_type=config.resolve_model_type(req.model),
         created_at=rec.get("created_at") or now,
         last_used_at=now,
@@ -2734,6 +2653,7 @@ async def _run_completion(req: ChatCompletionRequest,
                             )
                             content_produced = False
                             acc: List[str] = []
+                            tool_calls_acc: List[dict] = []
                             try:
                                 for chunk in stream_chunks(
                                     req.model, stream, req.tools, rewrite_fn=_stream_rewrite_fn,
@@ -2754,8 +2674,8 @@ async def _run_completion(req: ChatCompletionRequest,
                                             break
                                         yield _sse_error(_throttle_message())
                                         return
-                                    _collect_delta(chunk, acc)
-                                    if acc or '"tool_calls"' in chunk:
+                                    _collect_delta(chunk, acc, tool_calls_acc)
+                                    if acc or tool_calls_acc or '"tool_calls"' in chunk:
                                         content_produced = True
                                     yield chunk
                             except DeepSeekError as e:
@@ -2814,12 +2734,19 @@ async def _run_completion(req: ChatCompletionRequest,
                             if cleaned_reply and not resurgence.detect_refusal_or_stall(cleaned_reply)[0]:
                                 reply_text = cleaned_reply
                             _remember_thread(account.name, plan, stream.conversation_id,
-                                             req, reply_text)
+                                             req, reply_text, outgoing_calls=tool_calls_acc)
                             if api_key is not None:
                                 api_key.register_request(cur_prompt_tokens,
                                                          _est_tokens(reply_text))
+                            reply_for_log = reply_text
+                            if not reply_for_log and tool_calls_acc:
+                                tc_summary = []
+                                for tc in tool_calls_acc:
+                                    fn = tc.get("function") or {}
+                                    tc_summary.append(f"{fn.get('name', 'tool')}({str(fn.get('arguments', '{}'))[:160]})")
+                                reply_for_log = f"[Tool Call: {', '.join(tc_summary)}]"
                             _log_usage(api_key, account, plan, use_prompt,
-                                       reply_text, "ok", started, req.model,
+                                       reply_for_log, "ok", started, req.model,
                                        meta=getattr(stream, "meta", None))
                             pool.report(account, throttled=False)
                             if cache_key and turn_cache.should_cache(req) and reply_text:
@@ -3120,7 +3047,7 @@ async def _run_completion(req: ChatCompletionRequest,
     # Pisahkan tool call dari teks biasa. Parser juga mengembalikan teks
     # bersih, jadi penanda mentah tidak pernah bocor ke pengguna.
     clean_text, calls, broken = parse_tool_calls(reply.text)
-    calls, dropped = validate_tool_calls(calls)
+    calls, dropped = validate_tool_calls(calls, req.tools)
     if dropped:
         log.warning("akun %s: tool call dibuang (%s)", account.name,
                     "; ".join(dropped[:5]))
@@ -3148,12 +3075,13 @@ async def _run_completion(req: ChatCompletionRequest,
                     break
                 if nudge_reply and nudge_reply.text:
                     reply = nudge_reply
+                    n_clean, n_calls, n_broken = parse_tool_calls(reply.text)
+                    n_calls, n_dropped = validate_tool_calls(n_calls, req.tools)
                     _remember_thread(account.name, plan,
                                      reply.conversation_id,
                                      req,
-                                     getattr(reply, "text", None))
-                    n_clean, n_calls, n_broken = parse_tool_calls(reply.text)
-                    n_calls, n_dropped = validate_tool_calls(n_calls)
+                                     getattr(reply, "text", None),
+                                     outgoing_calls=to_tool_calls(n_calls) if n_calls else None)
                     if n_calls:
                         clean_text = (
                             f"{clean_text}\n{n_clean}".strip()
@@ -3186,7 +3114,7 @@ async def _run_completion(req: ChatCompletionRequest,
         if broken and not calls:
             diselamatkan = salvage_from_broken(reply.text)
             if diselamatkan:
-                calls, dropped = validate_tool_calls(diselamatkan)
+                calls, dropped = validate_tool_calls(diselamatkan, req.tools)
                 if calls:
                     broken = False
                     log.info("akun %s: tool call diselamatkan dari blok "
@@ -3211,7 +3139,7 @@ async def _run_completion(req: ChatCompletionRequest,
                             account.name, e)
                 break
             clean_text, calls, broken = parse_tool_calls(reply.text)
-            calls, dropped = validate_tool_calls(calls)
+            calls, dropped = validate_tool_calls(calls, req.tools)
             if dropped:
                 log.warning("akun %s: tool call penulisan ulang dibuang (%s)",
                             account.name, "; ".join(dropped[:5]))
@@ -3336,8 +3264,10 @@ async def _run_completion(req: ChatCompletionRequest,
         if final_clean:
             clean_text = final_clean
 
+    outgoing_tc = to_tool_calls(calls) if calls else None
     _remember_thread(account.name, plan, reply.conversation_id, req,
-                     clean_text or reply.text)
+                     clean_text or reply.text,
+                     outgoing_calls=outgoing_tc)
 
     resp = completion_response(req.model, clean_text, prompt,
                                reply.conversation_id,
@@ -3347,7 +3277,7 @@ async def _run_completion(req: ChatCompletionRequest,
     if calls:
         choice = resp["choices"][0]
         choice["message"]["content"] = clean_text or None
-        choice["message"]["tool_calls"] = to_tool_calls(calls)
+        choice["message"]["tool_calls"] = outgoing_tc
         choice["finish_reason"] = "tool_calls"
     # Alur penalaran dikirim terpisah sebagai reasoning_content, sesuai kontrak
     # OpenAI. Tanpa ini penalaran tercampur ke balasan final dan tampilan
@@ -3832,7 +3762,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
             "Length limit reached. Please start a new chat.",
         )
     clean_text, calls, broken = parse_tool_calls(joined)
-    calls, dropped = validate_tool_calls(calls)
+    calls, dropped = validate_tool_calls(calls, tools)
     if dropped:
         log.warning("stream: tool call dibuang (%s)", "; ".join(dropped[:5]))
 
@@ -3847,7 +3777,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
     if (broken or dropped) and not calls:
         diselamatkan = salvage_from_broken(joined)
         if diselamatkan:
-            calls, dropped = validate_tool_calls(diselamatkan)
+            calls, dropped = validate_tool_calls(diselamatkan, tools)
             if calls:
                 log.info("stream: tool call diselamatkan dari blok terpotong "
                          "tanpa request tambahan")
@@ -3862,7 +3792,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
             if not rw_text:
                 break
             rw_clean, rw_calls, rw_broken = parse_tool_calls(rw_text)
-            rw_calls, rw_dropped = validate_tool_calls(rw_calls)
+            rw_calls, rw_dropped = validate_tool_calls(rw_calls, tools)
             if rw_dropped:
                 log.warning("stream: tool call penulisan ulang dibuang (%s)",
                             "; ".join(rw_dropped[:5]))
@@ -3898,7 +3828,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
                 rw_calls = salvage_from_broken(rw_text)
                 if rw_calls:
                     rw_broken = False
-            rw_calls, rw_dropped = validate_tool_calls(rw_calls)
+            rw_calls, rw_dropped = validate_tool_calls(rw_calls, tools)
             if rw_calls and not rw_broken:
                 calls = rw_calls
                 dropped = rw_dropped
@@ -3940,7 +3870,7 @@ def stream_chunks(model: str, stream: Iterable[tuple],
                 if rw_text:
                     rw_clean, rw_calls, rw_broken = parse_tool_calls(rw_text)
                     if rw_calls:
-                        calls, dropped = validate_tool_calls(rw_calls)
+                        calls, dropped = validate_tool_calls(rw_calls, tools)
                     if rw_clean:
                         rw_sanitized = resurgence.cleanse_refusal_content(rw_clean, prof_name)
                         clean_text = rw_sanitized if rw_sanitized else ""
