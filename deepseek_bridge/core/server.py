@@ -30,6 +30,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import threading
 import time
@@ -754,19 +755,21 @@ def _keepalive_once(account: str) -> bool:
             pass
         return False
 
-    # 1. CEK PROAKTIF: Periksa sisa umur token dari JWT exp atau usia sesi
+    # 1. CEK PROAKTIF: Periksa sisa umur token dari JWT exp atau usia sesi (Layer 3 Jitter)
     now = time.time()
     jwt_exp = _extract_jwt_exp(session.token)
     needs_proactive_refresh = False
+    jittered_before_expiry = KEEPALIVE_BEFORE_EXPIRY + random.uniform(-1800.0, 1800.0)
+
     if jwt_exp is not None:
         remaining_seconds = jwt_exp - now
-        if remaining_seconds < KEEPALIVE_BEFORE_EXPIRY:
+        if remaining_seconds < jittered_before_expiry:
             log.info(
-                "keepalive %s: token JWT mendekati masa kedaluwarsa (sisa %.1f jam). Memperbarui secara proaktif...",
-                account, max(0.0, remaining_seconds / 3600.0)
+                "keepalive %s: token JWT mendekati masa kedaluwarsa (sisa %.1f jam, threshold %.1f jam). Memperbarui secara proaktif...",
+                account, max(0.0, remaining_seconds / 3600.0), jittered_before_expiry / 3600.0
             )
             needs_proactive_refresh = True
-    elif (now - session.captured_at) > max(3600.0, config.SESSION_MAX_AGE - KEEPALIVE_BEFORE_EXPIRY):
+    elif (now - session.captured_at) > max(3600.0, config.SESSION_MAX_AGE - jittered_before_expiry):
         log.info(
             "keepalive %s: usia sesi mendekati batas maksimum (%d hari). Memperbarui secara proaktif...",
             account, int(config.SESSION_MAX_AGE / 86400)
@@ -858,9 +861,21 @@ def _keepalive_once(account: str) -> bool:
 
 
 def _keepalive_loop() -> None:
-    """Siklus refresh untuk semua akun. Berhenti saat event di-set."""
-    while not _keepalive_stop.wait(KEEPALIVE_INTERVAL):
-        for name in list(get_pool().accounts):
+    """Siklus refresh untuk semua akun dengan human-like jittering.
+    
+    Layer 1: Cycle interval jitter (KEEPALIVE_INTERVAL ± 25%, misal 11-18 menit).
+    Layer 2: Multi-account shuffling & inter-account staggering delay (8-25 detik).
+    """
+    while not _keepalive_stop.is_set():
+        # Jitter interval per siklus agar tidak membentuk signature heartbeat periodik
+        jittered_wait = KEEPALIVE_INTERVAL * random.uniform(0.75, 1.25)
+        if _keepalive_stop.wait(jittered_wait):
+            break
+
+        accounts = list(get_pool().accounts)
+        random.shuffle(accounts)
+
+        for i, name in enumerate(accounts):
             if _keepalive_stop.is_set():
                 break
             try:
@@ -869,6 +884,12 @@ def _keepalive_loop() -> None:
                 # Satu akun gagal tidak boleh menjatuhkan siklus; akun lain
                 # tetap perlu diperiksa pada putaran berikutnya.
                 log.warning("keepalive %s gagal: %s", name, e)
+
+            # Stagger delay antar akun untuk mencegah thundering herd & deteksi korelasi IP
+            if i < len(accounts) - 1:
+                stagger_delay = random.uniform(8.0, 25.0)
+                if _keepalive_stop.wait(stagger_delay):
+                    break
 
 
 def keepalive_status() -> dict:
