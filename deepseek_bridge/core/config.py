@@ -58,7 +58,7 @@ ACCOUNTS_RAW = os.getenv("DSB_ACCOUNTS", "default")
 ACCOUNT_NAMES = [a.strip() for a in ACCOUNTS_RAW.split(";") if a.strip()]
 
 # Jeda minimum antar request pada satu akun, detik.
-MIN_GAP_SECONDS = float(os.getenv("DSB_MIN_GAP", "0.2"))
+MIN_GAP_SECONDS = float(os.getenv("DSB_MIN_GAP", "1.0"))
 # Lama pendinginan setelah satu akun kena throttle, detik.
 COOLDOWN_SECONDS = float(os.getenv("DSB_COOLDOWN", "20"))
 # Lama pendinginan setelah akun kena tantangan keamanan/challenge, detik (default 60s, bukan 1800s).
@@ -227,11 +227,21 @@ CLIENT_SETTINGS_PATH = "/api/v0/client/settings"
 INDEX_QUERY_PATH = "/api/v0/index/query"
 INDEX_PREPARE_PATH = "/api/v0/index/prepare"
 
-# --- Klien -----------------------------------------------------------------
-# Versi klien yang dikirim website, diambil dari tangkapan Playwright nyata.
-# Sebelum patch ini bridge mengirim 2.0.0 padahal website mengirim 2.7.0.
+# Target impersonate curl_cffi yang sinkron dengan Chrome sistem (157.x).
+# curl_cffi 0.16.3 tidak punya target chrome160; chrome150 paling dekat
+# dengan versi sistem. Semua permintaan wajib pakai nilai ini agar TLS
+# fingerprint tidak bertabrakan dengan User-Agent session.
 CLIENT_VERSION = "2.7.0"
-CURL_IMPERSONATE = os.getenv("DSB_IMPERSONATE", "chrome110")
+TLS_IMPERSONATE = "chrome150"
+CURL_IMPERSONATE = os.getenv("DSB_IMPERSONATE", TLS_IMPERSONATE)
+
+# User-Agent kanonik untuk semua request HTTP bridge. HeadlessChrome
+# dihindari karena WAF DeepSeek menganggapnya sidik otomasi telanjang.
+UA_CANONICAL = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/156.0.0.0 Safari/537.36"
+)
 
 # --- Model -----------------------------------------------------------------
 # DeepSeek web mengenal dua mode bernama, dipetakan ke model V4:

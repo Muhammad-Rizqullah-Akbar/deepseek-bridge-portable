@@ -368,7 +368,7 @@ class DeepSeekClient:
             "authorization": f"Bearer {self.session.token}",
             "accept": "*/*",
             "content-type": "application/json",
-            "user-agent": self.session.user_agent,
+            "user-agent": config.UA_CANONICAL,
             "origin": config.BASE,
             "referer": f"{config.BASE}/",
             "x-app-version": config.CLIENT_VERSION,

@@ -794,7 +794,7 @@ def _keepalive_once(account: str) -> bool:
         headers = {
             "authorization": f"Bearer {session.token}",
             "accept": "*/*",
-            "user-agent": session.user_agent,
+            "user-agent": config.UA_CANONICAL,
             "origin": config.BASE,
             "referer": f"{config.BASE}/",
             "x-app-version": config.CLIENT_VERSION,

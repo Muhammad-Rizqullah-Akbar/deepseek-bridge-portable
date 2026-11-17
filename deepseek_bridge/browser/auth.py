@@ -225,9 +225,14 @@ class Session:
         if not path.exists():
             return None
         try:
-            return cls(**json.loads(path.read_text(encoding="utf-8")))
+            obj = cls(**json.loads(path.read_text(encoding="utf-8")))
         except Exception:
             return None
+        # Normalisasi UA dari berkas sesi lama yang mungkin menyimpan HeadlessChrome/UA headless.
+        if not obj.user_agent or "HeadlessChrome" in obj.user_agent \
+                or "headless" in obj.user_agent.lower():
+            obj.user_agent = config.UA_CANONICAL
+        return obj
 
 
 # Membaca bearer token yang disimpan web app setelah login.
@@ -355,6 +360,11 @@ def _capture_from_context(context, page) -> Optional[Session]:
             page,
             "() => window.localStorage.getItem('deviceId') || window.localStorage.getItem('device_id') || ''"
         ) or ""
+        # Buang penanda headless. Kalau UA kosong atau mengandung
+        # HeadlessChrome, pakai UA kanonik (device_id tetap dipertahankan
+        # sebagai UUID sesi asli dari tab DeepSeek).
+        if not ua or "HeadlessChrome" in ua or "headless" in ua.lower():
+            ua = config.UA_CANONICAL
 
         tz_offset = _safe_evaluate(page, "() => new Date().getTimezoneOffset() * -60")
         tz_int = int(tz_offset) if tz_offset is not None else 0
