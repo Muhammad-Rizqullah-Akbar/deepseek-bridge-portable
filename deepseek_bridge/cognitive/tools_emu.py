@@ -189,30 +189,7 @@ def build_tool_instructions(tools: Optional[List[dict]], query: Optional[str] = 
     ]
 
     for t in selected_tools:
-        fn = t.get("function", t) if isinstance(t, dict) else {}
-        name = fn.get("name") or "tool"
-        desc = _one_line(fn.get("description"))
-
-        params = fn.get("parameters") or {}
-        props = params.get("properties") or {}
-        req_set = set(params.get("required") or [])
-        if props:
-            sig_parts = []
-            for k, v in list(props.items())[:8]:
-                p_type = v.get("type", "string")
-                enums = v.get("enum")
-                if enums and isinstance(enums, list):
-                    enum_str = "|".join(str(e) for e in enums[:6])
-                    part = f"{k}: [{enum_str}]"
-                else:
-                    part = f"{k}: {p_type}"
-                if k in req_set:
-                    part += " [REQUIRED]"
-                sig_parts.append(part)
-            sig = ", ".join(sig_parts)
-        else:
-            sig = "tanpa parameter"
-        lines.append(f"- {name}({sig}) :: {desc}")
+        lines.append(_format_tool_entry(t))
 
     if omitted_count > 0:
         lines.append(f"- ...dan {omitted_count} tools terdaftar lainnya (dapat dipanggil langsung via nama)")
@@ -224,6 +201,69 @@ def build_tool_instructions(tools: Optional[List[dict]], query: Optional[str] = 
                 _INSTRUCTIONS_CACHE.clear()
             _INSTRUCTIONS_CACHE[t_key] = res
     return res
+
+
+def _format_tool_entry(t: dict) -> str:
+    """Format satu schema tool OpenAI menjadi baris ringkas dengan penanda [REQUIRED]."""
+    fn = t.get("function", t) if isinstance(t, dict) else {}
+    name = fn.get("name") or "tool"
+    desc = _one_line(fn.get("description"))
+
+    params = fn.get("parameters") or {}
+    props = params.get("properties") or {}
+    req_set = set(params.get("required") or [])
+    if props:
+        sig_parts = []
+        for k, v in list(props.items())[:8]:
+            p_type = v.get("type", "string")
+            enums = v.get("enum")
+            if enums and isinstance(enums, list):
+                enum_str = "|".join(str(e) for e in enums[:6])
+                part = f"{k}: [{enum_str}]"
+            else:
+                part = f"{k}: {p_type}"
+            if k in req_set:
+                part += " [REQUIRED]"
+            sig_parts.append(part)
+        sig = ", ".join(sig_parts)
+    else:
+        sig = "tanpa parameter"
+    return f"- {name}({sig}) :: {desc}"
+
+
+def tool_names_of(tools: Optional[List[dict]]) -> List[str]:
+    """Ambil daftar nama tool unik dari payload OpenAI tools."""
+    names: List[str] = []
+    for t in tools or []:
+        fn = t.get("function", t) if isinstance(t, dict) else {}
+        name = fn.get("name")
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def build_delta_tool_instructions(
+    tools: Optional[List[dict]],
+    known_names: Optional[List[str]] = None,
+) -> str:
+    """Kirim hanya schema tool baru yang belum dikirim pada Turn 1/sebelumnya."""
+    if not tools:
+        return ""
+    known = set(known_names or [])
+    if not known:
+        return ""
+    new_tools = []
+    for t in tools:
+        fn = t.get("function", t) if isinstance(t, dict) else {}
+        name = fn.get("name")
+        if name and name not in known:
+            new_tools.append(t)
+    if not new_tools:
+        return ""
+    lines = ["[Schema tools baru aktif di sesi ini:]"]
+    for t in new_tools:
+        lines.append(_format_tool_entry(t))
+    return "\n".join(lines)
 
 
 def _find_dsml_invoke(text: str) -> Optional[Tuple[str, dict, int, int]]:

@@ -24,6 +24,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import threading
 import time
 from pathlib import Path
@@ -127,27 +128,13 @@ def profile_system_prompt(profile: str, max_chars: int = 0, include_prinsip: boo
 
 
 def profile_delta_anchor(profile: str) -> str:
-    """Jangkar identitas & sistem ringkas (~350 karakter) untuk turn delta (Turn 2+).
-
-    Karena sesi chat DeepSeek di hulu (`chat_session_id`) sudah memegang SOUL.md
-    utuh dan system prompt Hermes di KV cache dari Turn 1, turn lanjutan (`reused=True`)
-    tidak perlu mengirim ulang 15.000 karakter SOUL.md setiap kali tool dipanggil.
-    Jangkar ini menjaga persona, gaya bicara (soul), dan mandat eksekusi deterministik
-    tetap terkunci tanpa membebani konteks per turn.
-    """
+    """Jangkar identitas ringkas 1-baris untuk turn delta (Turn 2+)."""
     nama = normalize_profile(profile)
     if not nama:
         return ""
-    from ..hermes.discovery import get_profil
     from ..cognitive import resurgence
-    profil = get_profil(nama)
     disp = resurgence.get_display_name(nama)
-    peran = profil.peran if (profil and getattr(profil, "peran", None)) else "Chief Technical Architect & Sovereign Executor"
-    return (
-        f"[ACTIVE SOUL & SYSTEM ANCHOR: {disp} ({peran})]\n"
-        f"Pertahankan karakter, nada bicara khas {disp} (SOUL.md), dan konfigurasi sistem Hermes dari awal sesi. "
-        f"Eksekusi instruksi atau hasil tools pada giliran aktif ini secara langsung, presisi, dan objektif tanpa pengulangan konteks lama."
-    )
+    return f"[{disp}]"
 
 
 def _role_of(m) -> str:
@@ -514,9 +501,13 @@ def last_user_text(messages: List) -> str:
     return ""
 
 
-def _compact_tool_output(text: str, max_chars: int = 24000) -> str:
-    """Padatkan output tool yang terlalu besar dengan mempertahankan bagian awal dan akhir."""
-    s = (text or "").strip()
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+
+def _compact_tool_output(text: str, max_chars: int = 8000) -> str:
+    """Bersihkan ANSI/spasi berlebih lalu padatkan output tool jika melewati batas."""
+    s = _ANSI_ESCAPE_RE.sub("", text or "")
+    s = re.sub(r"\n{3,}", "\n\n", s).strip()
     if len(s) <= max_chars:
         return s
     head_len = int(max_chars * 0.65)
@@ -524,7 +515,7 @@ def _compact_tool_output(text: str, max_chars: int = 24000) -> str:
     dropped = len(s) - (head_len + tail_len)
     return (
         f"{s[:head_len].rstrip()}\n\n"
-        f"[... {dropped} karakter output tool dipadatkan agar efisien ...]\n\n"
+        f"[... {dropped} karakter output tool dipadatkan agar hemat kuota; gunakan rg/sed untuk baca bagian spesifik ...]\n\n"
         f"{s[-tail_len:].lstrip()}"
     )
 
@@ -553,7 +544,7 @@ def delta_turns(messages: List) -> str:
         if role == "tool":
             has_tool_result = True
             name = m.get("name") if isinstance(m, dict) else getattr(m, "name", None)
-            compact_out = _compact_tool_output(text, max_chars=24000)
+            compact_out = _compact_tool_output(text, max_chars=8000)
             parts.append(f"Hasil tools {name or ''}:\n{compact_out}")
         elif role == "user":
             parts.append(text)
@@ -561,11 +552,8 @@ def delta_turns(messages: List) -> str:
         return last_user_text(messages)
     if has_tool_result:
         parts.append(
-            "[Catatan sistem: Seluruh tools (terminal, write_file, patch, "
-            "execute_code, skill_manage, tool_search, tool_describe, tool_call) "
-            "AKTIF PENUH di sesi ini. Lanjutkan pemanggilan tools berikutnya bila "
-            "masih diperlukan, atau sampaikan analisis hasil akhirnya jika seluruh "
-            "langkah sudah tuntas.]"
+            "[Tools aktif. Lanjutkan <tool_call> jika perlu data, "
+            "atau beri jawaban akhir dalam Bahasa Indonesia.]"
         )
     return "\n\n".join(parts)
 
