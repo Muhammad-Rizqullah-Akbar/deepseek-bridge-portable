@@ -56,10 +56,10 @@ from .ratelimit import RateLimiter
 from .schemas import ChatCompletionRequest, ChatMessage
 from ..state import db as bridge_db
 from ..state import threads as thread_mod
-from ..cognitive.tools_emu import (TOOL_CALL_START, build_tool_instructions,
-                        build_tool_prompt, parse_tool_calls,
-                        tool_names_note, to_tool_calls,
-                        validate_tool_calls)
+from ..cognitive.tools_emu import (TOOL_CALL_START, build_delta_tool_instructions,
+                        build_tool_instructions, build_tool_prompt,
+                        parse_tool_calls, tool_names_note, tool_names_of,
+                        to_tool_calls, validate_tool_calls)
 from ..cognitive.recovery import (MAX_REWRITE_ATTEMPTS, intent_nudge_prompt,
                        is_unfulfilled_tool_intent, missing_fields_report,
                        rewrite_prompt, salvage_from_broken,
@@ -198,6 +198,7 @@ def get_pool() -> AccountPool:
                         session_file=Path(e["session_file"]),
                         profile_dir=Path(e["profile_dir"]),
                         priority=int(e.get("priority", 50)),
+                        enabled=bool(e.get("enabled", True)),
                     )
                     for e in entries
                 ]
@@ -1120,6 +1121,8 @@ def admin_reload(reset_cooldowns: bool = False):
                 name=e["name"],
                 session_file=Path(e["session_file"]),
                 profile_dir=Path(e["profile_dir"]),
+                priority=int(e.get("priority", 50)),
+                enabled=bool(e.get("enabled", True)),
             )
             for e in entries
         ]
@@ -1238,7 +1241,8 @@ def admin_accounts():
                 round(session.age / 60.0, 1) if session else None),
             "session_fresh": bool(
                 session and session.age < config.SESSION_MAX_AGE),
-            "in_pool": acc.name in pool.accounts,
+            "enabled": acc.enabled,
+            "in_pool": acc.name in pool.accounts and pool.accounts[acc.name].enabled,
             "muted": pool.accounts[acc.name].muted if acc.name in pool.accounts else None,
             "window_open": (
                 acc.name in _open_windows
@@ -1645,6 +1649,28 @@ def admin_account_close(name: str):
         entry["holder"]["stop"] = True
     log.info("profil %s: permintaan tutup", name)
     return {"ok": True, "closing": True, "account": name}
+
+
+@app.post("/admin/accounts/{name}/enabled")
+async def admin_account_enabled(name: str, request: Request):
+    """Aktifkan atau nonaktifkan keikutsertaan akun di pool (keepalive tetap berjalan)."""
+    try:
+        body = await request.json()
+    except Exception:
+        return _error("Payload request harus berformat JSON yang valid.", status=400)
+    if not isinstance(body, dict) or "enabled" not in body:
+        return _error("Field 'enabled' wajib diisi (true/false).", status=400)
+    enabled = bool(body["enabled"])
+    reg = get_registry()
+    if not reg.get(name):
+        return _error(f"Akun '{name}' tidak ditemukan.", status=404)
+    reg.update(name, enabled=enabled)
+    pool = get_pool()
+    acc_state = pool.accounts.get(name)
+    if acc_state is not None:
+        acc_state.enabled = enabled
+    log.info("akun %s: pool routing %s", name, "DIAKTIFKAN" if enabled else "DINONAKTIFKAN")
+    return {"ok": True, "name": name, "enabled": enabled}
 
 
 def _reset_pool() -> None:
@@ -2476,7 +2502,8 @@ def _plan_turn(req: ChatCompletionRequest, api_key: Optional[ApiKey],
         delta = thread_mod.delta_turns(req.messages)
         prompt = delta or thread_mod.last_user_text(req.messages)
         if req.tools:
-            tools_block = build_tool_instructions(req.tools, query=prompt)
+            known = rec.get("known_tools") or tool_names_of(req.tools)
+            tools_block = build_delta_tool_instructions(req.tools, known)
             if tools_block:
                 prompt = f"{prompt}\n\n{tools_block}"
         if config.PROFILE_STAMP_ENABLED and profile:
@@ -2512,8 +2539,11 @@ def _remember_thread(account_name: str, plan: TurnPlan,
     """
     if not plan.thread_key or not conversation_id:
         return
-    store = plan.store or _thread_registry().store(
+    if plan.store and getattr(plan.store, "account_name", account_name) != account_name:
+        plan.store.drop(plan.thread_key)
+    store = _thread_registry().store(
         account_name, _account_dirs([account_name])[account_name])
+    plan.store = store
     if _is_length_limit_text(reply_text):
         log.warning("thread %s mencapai batas panjang DeepSeek, dihapus dari store",
                     plan.thread_key)
@@ -2558,6 +2588,7 @@ def _remember_thread(account_name: str, plan: TurnPlan,
         system_hash=(thread_mod._digest(thread_mod.compact_system(sys_text))
                      if sys_text else ""),
         tools_hash=_tools_digest(req.tools),
+        known_tools=list(dict.fromkeys([*(rec.get("known_tools") or []), *tool_names_of(req.tools)])),
     )
     # Cerminkan ke SQLite supaya sesi bisa ditelusuri setelah server
     # mati. Kegagalan di sini tidak boleh membuat request gagal, jadi
@@ -2820,8 +2851,9 @@ async def _run_completion(req: ChatCompletionRequest,
                         instruksi, rw_cid, None if rw_cid else use_model, req.thinking_on, False
                     )
                     if cur_stream is not None and getattr(rw_reply, "conversation_id", None):
-                        cur_stream.conversation_id = rw_reply.conversation_id
                         parts = re.split(r"[:|]", rw_reply.conversation_id)
+                        if parts and parts[0].strip():
+                            cur_stream._session_id = parts[0].strip()
                         if len(parts) > 1 and parts[1].strip().isdigit():
                             cur_stream._message_id = int(parts[1].strip())
                     if not rw_cid and getattr(rw_reply, "conversation_id", None):
@@ -2952,10 +2984,16 @@ async def _run_completion(req: ChatCompletionRequest,
                         is_challenge = getattr(e, "biz_code", None) == 40303 or isinstance(e, DeepSeekChallengeRequired)
                         is_waf = "AWS WAF" in str(e)
                         is_terminated = isinstance(e, DeepSeekSessionTerminated)
+                        is_usage_limit = ("usage limit reached" in str(e).lower() or "user restricted" in str(e).lower())
                         if e.is_muted:
                             pool.mark_muted(account, e.mute_until)
                         elif e.is_invalid_token:
                             discard_rejected_session(account)
+                        elif is_usage_limit:
+                            log.warning("akun %s: menyentuh batas kuota DeepSeek (Usage limit reached), isolasi 1800s & failover", account.name)
+                            pool.mark_throttled(account, 1800.0)
+                            if plan.store and plan.thread_key:
+                                plan.store.drop(plan.thread_key)
                         elif is_challenge:
                             log.warning("akun %s: menerima tantangan keamanan (CHALLENGE_REQUIRED 40303), isolasi akun %ds", account.name, int(config.CHALLENGE_COOLDOWN_SECONDS))
                             pool.mark_challenge(account, config.CHALLENGE_COOLDOWN_SECONDS)
@@ -2977,11 +3015,15 @@ async def _run_completion(req: ChatCompletionRequest,
                             if next_acc is not None and next_acc.name != account.name:
                                 log.info("stream: failover otomatis (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
                                 yield ": keepalive-account-failover\n\n"
-                                # Drop thread dari akun lama sebelum pindah.
+                                # Drop thread dari akun lama sebelum pindah dan ikat store ke akun baru.
                                 if plan.store and plan.thread_key:
                                     plan.store.drop(plan.thread_key)
                                 _release_slot(account.name)
                                 account = next_acc
+                                plan.store = _thread_registry().store(
+                                    account.name, _account_dirs([account.name])[account.name])
+                                plan.rec = None
+                                plan.reused = False
                                 _acquire_slot(account.name)
                                 client = get_client_for(account)
                                 use_prompt = _build_fresh_bootstrap_prompt(req, profil)
@@ -3007,11 +3049,15 @@ async def _run_completion(req: ChatCompletionRequest,
                             if next_acc is not None and next_acc.name != account.name:
                                 log.info("stream: failover otomatis exception (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
                                 yield ": keepalive-account-failover\n\n"
-                                # Drop thread dari akun lama sebelum pindah.
+                                # Drop thread dari akun lama sebelum pindah dan ikat store ke akun baru.
                                 if plan.store and plan.thread_key:
                                     plan.store.drop(plan.thread_key)
                                 _release_slot(account.name)
                                 account = next_acc
+                                plan.store = _thread_registry().store(
+                                    account.name, _account_dirs([account.name])[account.name])
+                                plan.rec = None
+                                plan.reused = False
                                 _acquire_slot(account.name)
                                 client = get_client_for(account)
                                 use_prompt = _build_fresh_bootstrap_prompt(req, profil)
@@ -3137,10 +3183,16 @@ async def _run_completion(req: ChatCompletionRequest,
     except DeepSeekError as e:
         is_challenge = getattr(e, "biz_code", None) == 40303 or isinstance(e, DeepSeekChallengeRequired)
         is_waf = "AWS WAF" in str(e)
+        is_usage_limit = ("usage limit reached" in str(e).lower() or "user restricted" in str(e).lower())
         if e.is_muted:
             pool.mark_muted(account, e.mute_until)
         elif e.is_invalid_token:
             discard_rejected_session(account)
+        elif is_usage_limit:
+            log.warning("akun %s: menyentuh batas kuota DeepSeek (Usage limit reached), isolasi 1800s & failover", account.name)
+            pool.mark_throttled(account, 1800.0)
+            if plan.store and plan.thread_key:
+                plan.store.drop(plan.thread_key)
         elif is_challenge:
             log.warning("akun %s: menerima tantangan keamanan (CHALLENGE_REQUIRED 40303), isolasi akun %ds", account.name, int(config.CHALLENGE_COOLDOWN_SECONDS))
             pool.mark_challenge(account, config.CHALLENGE_COOLDOWN_SECONDS)
@@ -3153,8 +3205,14 @@ async def _run_completion(req: ChatCompletionRequest,
         next_acc = pool.acquire(config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
         if next_acc is not None and next_acc.name != account.name:
             log.info("non-stream: failover otomatis (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
+            if plan.store and plan.thread_key:
+                plan.store.drop(plan.thread_key)
             _release_slot(account.name)
             account = next_acc
+            plan.store = _thread_registry().store(
+                account.name, _account_dirs([account.name])[account.name])
+            plan.rec = None
+            plan.reused = False
             await run_in_threadpool(_acquire_slot, account.name)
             client = get_client_for(account)
             fresh_prompt = _build_fresh_bootstrap_prompt(req, profil)

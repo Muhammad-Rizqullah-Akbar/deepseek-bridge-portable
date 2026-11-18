@@ -52,6 +52,7 @@ class AccountState:
     in_flight: int = 0
     # Cooldown challenge (detik). Dipakai untuk isolasi akun saat CHALLENGE_REQUIRED.
     challenge_cooldown: float = 0.0
+    enabled: bool = True
     active_sessions: Dict[str, int] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -201,6 +202,8 @@ class AccountPool:
         with self._pick_lock:
             ready = []
             for acc in self.accounts.values():
+                if not acc.enabled:
+                    continue
                 if only is not None and acc.name not in only:
                     continue
                 if acc.muted and not acc.is_cooling(now):

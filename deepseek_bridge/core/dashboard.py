@@ -453,6 +453,23 @@ async function openProfile(name, btn) {
   }
 }
 
+async function toggleAccount(name, nextEnabled, btn) {
+  btn.disabled = true;
+  try {
+    const r = await fetch('/admin/accounts/' + encodeURIComponent(name) + '/enabled', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({enabled: nextEnabled})
+    });
+    const o = await r.json();
+    if (!r.ok) throw new Error(o.error || o.detail || 'gagal mengubah status');
+    load();
+  } catch (e) {
+    alert('Gagal mengubah status akun ' + name + ': ' + e.message);
+    btn.disabled = false;
+  }
+}
+
 async function deleteAccount(name, btn) {
   if (!confirm('Hapus akun \'' + name + '\' dari registry?\n\nBerkas sesi dan profil di disk tidak akan dihapus.')) return;
   btn.disabled = true;
@@ -576,9 +593,10 @@ function renderAccounts(o, rtMap) {
       <td>${sesi}</td>
       <td>${refresh}</td>
       <td><code>${esc(a.token_prefix || '-')}</code></td>
-      <td>${routingPill(rt)}${rt ? `<span class="sub"> · ${rt.total_ok} ok</span>` : ''}</td>
+      <td>${a.enabled === false ? pill('pool off', 'off') : routingPill(rt)}${rt ? `<span class="sub"> · ${rt.total_ok} ok</span>` : ''}</td>
       <td>
         <div class="acts">
+          <button class="btn ${a.enabled === false ? 'primary' : 'ghost'} toggleacc" data-acc="${esc(a.name)}" data-next="${a.enabled === false ? '1' : '0'}">${a.enabled === false ? 'Aktifkan Pool' : 'Nonaktifkan'}</button>
           ${a.window_open
             ? `<button class="btn closewin" data-acc="${esc(a.name)}">Tutup Browser</button>`
             : `<button class="btn primary openwin" data-acc="${esc(a.name)}">Buka Browser</button>`}
@@ -597,6 +615,9 @@ function renderAccounts(o, rtMap) {
       ${rows || '<tr><td colspan="7" class="empty">Belum ada akun. Tambahkan di bawah.</td></tr>'}
     </tbody></table>
     ${policyLine(o.policy)}`);
+  document.querySelectorAll('#acctable button.toggleacc').forEach(b => {
+    b.onclick = () => toggleAccount(b.dataset.acc, b.dataset.next === '1', b);
+  });
   document.querySelectorAll('#acctable button.relog').forEach(b => {
     b.onclick = () => relogin(b.dataset.acc, b);
   });

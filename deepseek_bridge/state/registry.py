@@ -33,6 +33,7 @@ class Account:
     session_file: str = ""
     note: str = ""
     priority: int = 50
+    enabled: bool = True
 
     def __post_init__(self) -> None:
         if not self.name or not self.name.strip():
