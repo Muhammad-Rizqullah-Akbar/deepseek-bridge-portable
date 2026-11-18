@@ -37,3 +37,12 @@ keys.json
 *.swo
 .DS_Store
 Thumbs.db
+
+# Local artifacts & temporary files
+Folder/
+Target/
+Run as administrator
+verify_final.py
+tmp_*.js
+*.log
+!.env.example

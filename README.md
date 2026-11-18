@@ -119,9 +119,11 @@ Setiap akun DeepSeek memiliki direktori profil Chromium mandiri di `data/session
 
 ### 3. Tri-Tier Self-Healing Keepalive Engine (Uptime 24/7)
 Server memelihara sesi secara otomatis di latar belakang:
-1. **Tier 1 (Lightweight Heartbeat - tiap 15 menit):** Probe HTTP non-intrusif memanggil `/api/v0/users/current` menggunakan `curl-cffi` (`impersonate="chrome120"`). Cookies diperbarui dan timestamp sesi disinkronkan tanpa membebani RAM/CPU.
-2. **Tier 2 (Proactive Headless Renewal):** Dekoder internal membaca klaim `exp` pada JWT. Jika sisa umur token kurang dari **4 jam** (atau usia sesi mendekati batas maksimum), bridge secara proaktif menjalankan refresh headless di latar belakang menggunakan profil Chromium akun untuk menangkap token segar sebelum token lama kedaluwarsa.
+1. **Tier 1 (Lightweight Heartbeat - tiap 15 menit):** Probe HTTP non-intrusif memanggil `/api/v0/users/current` menggunakan `curl-cffi` (`impersonate="chrome150"`) dengan header identitas yang sama persis seperti jalur completion. Cookies diperbarui dan timestamp sesi disinkronkan tanpa membebani RAM/CPU.
+2. **Tier 2 (Proactive Headless Renewal):** Untuk token JWT, dekoder internal membaca klaim `exp` dan memperbarui token bila sisa umurnya kurang dari **4 jam**. Untuk token opaque non-JWT yang tidak membawa `exp`, bridge memakai kadens tetap **4 jam** berdasarkan `token_issued_at`. Keduanya menjalankan refresh headless di latar belakang menggunakan profil Chromium akun sebelum token lama diputus server.
 3. **Tier 3 (Reactive Self-Healing Fallback):** Jika hulu mengembalikan error `INVALID_TOKEN` (40003) atau AWS WAF Challenge (status 202), bridge seketika membuang token mati dan memperbarui sesi secara otonom via headless context tanpa menghentikan server atau merepotkan pengguna.
+
+**Header Fidelity (XHR, bukan navigasi):** Sejak 2.8.0 seluruh request API memakai set header hasil tangkapan CDP `Network.requestWillBeSentExtraInfo` dari `chat.deepseek.com`: `sec-ch-ua` Chrome 150, `sec-ch-ua-platform: "Windows"`, `sec-fetch-dest: empty`, `sec-fetch-mode: cors`, `sec-fetch-site: same-origin`, `accept-language`, dan `priority`. Header navigasi bawaan curl_cffi (`Sec-Fetch-User`, `Upgrade-Insecure-Requests`, `Sec-Fetch-Dest: document`) dimatikan lewat `default_headers=False` karena memanggil API dengan header navigasi adalah sinyal bot. `x-app-version` dihapus karena bundle web tidak mengirimnya, dan `x-device-id` kini UUIDv4 sesuai regex klien.
 
 ### 4. Arsitektur Zero-Coldstart & Matriks Ketahanan Sistem
 Untuk mengeliminasi latensi coldstart pada setiap turn dan menjamin kestabilan kelas produksi:
@@ -149,7 +151,7 @@ Bridge dilengkapi auditor bawaan yang memeriksa kesiapan sistem operasi sebelum 
     ├─ [OK] Python v3.12.2 (64-bit)
     ├─ [OK] Node.js v22.23.4 (9router WebIDL & zstd compatible)
     ├─ [OK] PoW Engine (Wasmtime)          : wasmtime vready
-    ├─ [OK] TLS Fingerprint (curl-cffi)    : curl_cffi v0.17.0
+    ├─ [OK] TLS Fingerprint (curl-cffi)    : curl_cffi v0.16.3
     ├─ [OK] Browser Engine (Playwright)    : Driver terpasang
     └─ [OK] Port 8787 TERSEDIA             : Siap digunakan
 
