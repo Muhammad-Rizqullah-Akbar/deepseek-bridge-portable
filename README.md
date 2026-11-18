@@ -1,42 +1,46 @@
 <div align="center">
 
 # ⚡ DEEPSEEK BRIDGE PORTABLE
-### *Enterprise-Grade, Zero-Token-Cost OpenAI Gateway with Native Hermes Dynamic Introspection*
+### *OpenAI-Compatible Local Gateway with Native Hermes Introspection & Multi-Account Session Pooling*
 
-[![Author: inirizqullahakbar](https://img.shields.io/badge/Author-Muhammad--Rizqullah--Akbar-00F0FF?style=for-the-badge&logo=github&logoColor=black)](https://github.com/Muhammad-Rizqullah-Akbar)
+[![Author: Muhammad-Rizqullah-Akbar](https://img.shields.io/badge/Author-Muhammad--Rizqullah--Akbar-00F0FF?style=for-the-badge&logo=github&logoColor=black)](https://github.com/Muhammad-Rizqullah-Akbar)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](https://opensource.org/licenses/MIT)
+[![Python](https://img.shields.io/badge/Python-%3E%3D3.10-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D22.0.0-68a063?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org/)
-[![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776ab?style=for-the-badge&logo=python&logoColor=white)](https://www.python.org/)
 [![Context](https://img.shields.io/badge/Context%20Window-890%2C880%20Tokens-ff6b6b?style=for-the-badge)](https://chat.deepseek.com)
 [![Hermes Native](https://img.shields.io/badge/Hermes%20Agent-Native%20Modular-7952b3?style=for-the-badge)](https://github.com/nousresearch/hermes-agent)
 [![PRs Welcome](https://img.shields.io/badge/PRs-Welcome-brightgreen.svg?style=for-the-badge)](CONTRIBUTING.md)
 
 <p align="center">
-  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=18&duration=3000&pause=1000&color=00F0FF&center=true&vCenter=true&width=680&lines=Seamless+Multi-Account+DeepSeek+Web+Pooling;Zero-Token+Cost+Autonomous+Agent+Routing;1-Click+Hermes+Agent+Dynamic+Discovery;Clean-Slate+%7C+Zero-Leakage+%7C+Domain-Driven" alt="Typing SVG" />
+  <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&weight=600&size=18&duration=3000&pause=1000&color=00F0FF&center=true&vCenter=true&width=680&lines=Session-Aware+Multi-Account+Pooling;OpenAI-Compatible+SSE+Gateway;Native+Hermes+Dynamic+Discovery;Clean-Slate+%7C+Zero-Leakage+%7C+Portable" alt="Typing SVG" />
 </p>
 
-[Fitur Utama](#-fitur-utama) • [Alur Integrasi](#-alur-integrasi-sistem) • [Batasan Headless](#-batasan-otentikasi-gui-vs-headless-vps) • [Quickstart](#-quickstart-3-langkah) • [Etika Penggunaan](#-manifesto-penggunaan-beretika--apresiasi-deepseek) • [Kontribusi](#-komunitas-kontribusi--kolaborasi-open-source) • [Lisensi](#-lisensi--penafian-hukum)
+[Fitur Utama](#-fitur-utama) • [Arsitektur & Alur Sistem](#-arsitektur--alur-sistem) • [Quickstart](#-quickstart-panduan-penggunaan) • [Ketahanan Sesi 24/7](#-arsitektur-sesi-247--protokol-autentikasi) • [Referensi CLI](#-referensi-lengkap-perintah-cli) • [Etika & Apresiasi](#-manifesto-penggunaan-beretika--apresiasi-untuk-deepseek) • [Kontribusi](#-komunitas-kontribusi--kolaborasi-open-source) • [Lisensi](#-lisensi--penafian-hukum)
 
 ---
 </div>
 
+> [!NOTE]
+> **AI-Generated Documentation (Written by AI):** Seluruh dokumentasi `README.md` ini disusun dan diperbarui dengan bantuan AI (*written by AI*) berdasarkan peninjauan langsung terhadap basis kode proyek.
+
 > [!IMPORTANT]
-> **🚀 Zero-Cost Autonomous Infrastructure:** DeepSeek Bridge menjembatani Web Engine DeepSeek Latest (selalu mengikuti versi model chat & reasoner DeepSeek terkini secara realtime) menjadi endpoint standar OpenAI (`http://127.0.0.1:8787/v1`) dengan context window native **890,880 token**. Dirancang untuk menjalankan beban kerja agen otonom (seperti **Hermes Agent CLI / Desktop**) tanpa perlu membayar tagihan token API komersial.
+> **Local OpenAI-Compatible Infrastructure:** DeepSeek Bridge Portable menjembatani sesi web DeepSeek menjadi endpoint API standar OpenAI (`http://127.0.0.1:8787/v1`) dengan *context window* hingga **890,880 token**. Dirancang agar selaras dengan alur kerja agen otonom (**Hermes Agent CLI / Desktop**) dan gateway lokal (**9router**), lengkap dengan Web Dashboard manajemen akun dan API Key.
 
 ---
 
 ## 🌟 Fitur Utama
 
-- 🧠 **Dynamic Hermes Introspection:** Bebas path hardcode. Bridge memindai direktori profil Hermes (`%LOCALAPPDATA%\hermes` atau `~/.hermes`) secara runtime, membaca `SOUL.md`, `USER.md`, dan `memories/` untuk mengisolasi context thread per profil secara otomatis.
-- 🔄 **Stateful Session Continuity:** 1 Sesi percakapan Hermes dipetakan ke 1 `chat_session_id` DeepSeek tanpa membuat chat baru di setiap turn. Menghemat bandwidth hingga 95% dan mencegah flagging abuse oleh firewall hulu.
-- 🛡️ **Penta-Layer Cognitive Defense:** Dilengkapi refusal neutralizer bawaan, token censorship sanitizer, dan XML tool emulator untuk eksekusi workflow coding tanpa henti.
-- 🔀 **Dynamic Multi-Account Pooling:** Menyeimbangkan beban request ke banyak akun DeepSeek sekaligus (`acc1`, `acc2`, dst) menggunakan scheduler round-robin adaptif dengan interval pendinginan cerdas.
-- 📦 **Clean-Slate & Zero-Leakage:** Kredensial, cookie sesi, dan file database tersimpan relatif di `data/session/` dan 100% diabaikan oleh `.gitignore`. Sangat aman untuk di-clone atau dipindahkan lintas perangkat.
-- 🔌 **1-Click 9router Connector:** Terintegrasi langsung dengan 9router Gateway (`:20128`) menggunakan payload valid (`apiType: "chat"`).
+- 🧠 **Dynamic Hermes Introspection:** Memindai direktori profil Hermes (`%LOCALAPPDATA%\hermes` atau `~/.hermes`) secara dinamis pada saat runtime, membaca `SOUL.md`, `USER.md`, dan `memories/` untuk mengisolasi konteks *thread* per profil secara otomatis tanpa konfigurasi path manual.
+- 🔄 **Stateful Session Continuity:** Memetakan satu sesi percakapan Hermes (`thread_key`) ke satu `chat_session_id` DeepSeek secara persisten. Request lanjutan hanya mengirimkan delta percakapan baru sehingga menghemat token/bandwidth serta menjaga kontinuitas *KV-cache*.
+- 🔀 **Session-Aware Multi-Account Pooling:** Mendistribusikan beban ke banyak akun DeepSeek dengan pelacakan konkurensi berbasis sesi (`active_sessions` per `thread_key`). Request lanjutan dalam room chat yang sama tidak saling memblokir, sedangkan batas konkurensi hanya diterapkan pada sesi paralel yang berbeda.
+- 🔐 **Fresh WASM PoW & Sinkronisasi TLS `chrome150`:** Mengambil tantangan Proof-of-Work terbaru di setiap request dan menyelesaikannya secara lokal melalui sandbox `wasmtime` (`sha3_wasm_bg.wasm`), dipadukan dengan `curl_cffi >= 0.17.0` (`impersonate="chrome150"`, mendukung hingga `chrome152`).
+- 🛠️ **Hermes-Native Tooling Protocol:** Menyeragamkan pemanggilan *tool* ke format `<tool_call>` JSON yang tervalidasi ketat (`[REQUIRED]` fields), dilengkapi narasi aktivitas singkat berbahasa Indonesia sebelum eksekusi tool serta dukungan *streaming* `reasoning_content` via SSE.
+- 🖥️ **Web Dashboard & Interactive 9router Connector:** Menyediakan dashboard terintegrasi (`http://127.0.0.1:8787/`) untuk manajemen akun, pembuatan API Key, tombol **Salin** API Key penuh, pemantauan kuota/telemetry, serta pemilihan API Key secara interaktif saat menghubungkan ke 9router Gateway (`:20128`).
+- 📦 **Zero-Leakage Repository Design:** Seluruh kredensial lokal (`.env`, `keys.json`, `data/session/`), log, dan berkas sementara diabaikan sepenuhnya oleh `.gitignore`, sementara `.env.example` tetap disertakan sebagai templat konfigurasi.
 
 ---
 
-## 🔄 Alur Integrasi Sistem
+## 🔄 Arsitektur & Alur Sistem
 
 ```mermaid
 sequenceDiagram
@@ -51,12 +55,64 @@ sequenceDiagram
     Hermes->>NineRouter: POST /v1/chat/completions (model: dsk/dsk-auto)
     Note over NineRouter: Routing prefix 'dsk' -> DeepSeek Bridge
     NineRouter->>Bridge: Forward payload (SOUL + USER + MEMORY + Tools)
-    Note over Bridge: Dynamic Profile Detection & Thread Continuity
-    Bridge->>DeepSeek: Stream completion via curl-cffi (TLS Impersonate)
-    DeepSeek-->>Bridge: Raw Stream (<think> + Markdown)
-    Bridge-->>NineRouter: OpenAI-compatible SSE Stream
+    Note over Bridge: Session-Aware Pool & Thread Continuity
+    Bridge->>DeepSeek: Fresh PoW + Stream via curl-cffi (chrome150)
+    DeepSeek-->>Bridge: Raw Stream (Thinking + Content)
+    Bridge-->>NineRouter: OpenAI-compatible SSE Stream + <tool_call>
     NineRouter-->>Hermes: Live Tokens Delivery
     Hermes-->>User: Respons Agen Selesai
+```
+
+---
+
+## 🚀 Quickstart (Panduan Penggunaan)
+
+### Prasyarat
+- **Python 3.10+** (direkomendasikan 3.11 / 3.12 / 3.14)
+- **Node.js 22+** (untuk ekosistem 9router Gateway)
+- **Lingkungan Desktop GUI** untuk login akun pertama kali (lihat catatan [GUI vs Headless VPS](#-batasan-otentikasi-gui-vs-headless-vps))
+
+### Langkah 1 — Clone & Jalankan Installer
+Installer otomatis membuat *virtual environment* lokal (`.venv`), memasang seluruh dependensi (termasuk `curl-cffi>=0.17.0`, `wasmtime`, dan `playwright`), serta menyiapkan perintah `deepseek-bridge`:
+
+```bash
+git clone https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable.git
+cd deepseek-bridge-portable
+
+# Windows:
+.\bootstrap.bat
+
+# Linux / macOS:
+chmod +x bootstrap.sh && ./bootstrap.sh
+```
+
+*(Opsional)* Salin `.env.example` menjadi `.env` jika ingin menyesuaikan port, batas konkurensi, atau parameter timeout.
+
+### Langkah 2 — Audit Lingkungan & Jalankan Server
+```bash
+# Verifikasi kesiapan Python, Wasmtime, curl_cffi, Playwright, dan port
+deepseek-bridge check
+
+# Jalankan gateway & Web Dashboard di http://127.0.0.1:8787/
+deepseek-bridge serve
+```
+
+### Langkah 3 — Kelola API Key & Login Akun DeepSeek
+1. Buka **Web Dashboard** di **`http://127.0.0.1:8787/`** (atau jalankan `deepseek-bridge dashboard`).
+2. Pada panel **API Key**, buat key baru lalu klik tombol **Salin** untuk menyalin token penuhnya.
+3. Pada panel **Akun**, tambahkan dan login akun DeepSeek Anda (atau via CLI `deepseek-bridge login acc1`). Setelah login berhasil dan sesi tersimpan ke `data/session/<nama>/session.json`, jendela browser dapat ditutup.
+
+### Langkah 4 — Hubungkan ke 9router & Hermes
+```bash
+# Injeksi provider & API Key bridge ke 9router Gateway (:20128)
+# Jika sudah ada beberapa API Key, CLI akan menampilkan menu pilihan key secara interaktif
+deepseek-bridge connect
+
+# Konfigurasikan Hermes agar mengarah ke model dsk/dsk-auto
+deepseek-bridge setup-hermes
+
+# Mulai sesi agen Hermes Anda
+hermes -p mr-robot chat
 ```
 
 ---
@@ -64,83 +120,68 @@ sequenceDiagram
 ## ⚠️ Batasan Otentikasi: GUI vs Headless VPS
 
 > [!WARNING]
-> **Pahami Alur Autentikasi Sebelum Memasang di Server/VPS:**
+> **Alur Autentikasi untuk Server / VPS Tanpa Tampilan Grafis:**
 >
 > 1. **Login Pertama Membutuhkan Tampilan Desktop GUI:**
->    DeepSeek menerapkan verifikasi puzzle captcha Cloudflare dan OTP email saat login pertama. Playwright **wajib membuka jendela browser visual** (`headless=False`) untuk menangkap sesi awal.
-> 2. **Tidak Mendukung Login Langsung di Headless Linux VPS Tanpa Monitor:**
->    Jika Anda menjalankan `deepseek-bridge login` di Linux VPS murni tanpa X11 / Wayland, Playwright akan melempar error `cannot open display`.
-> 3. **Solusi Portabilitas Lintas Perangkat:**
->    Lakukan login sekali di laptop/PC lokal Anda. Salin file `data/session/<nama>/session.json` (format Plain JSON) ke folder VPS Anda di `data/session/<nama>/session.json`. Bridge di VPS langsung aktif seketika menggunakan `curl-cffi` tanpa butuh display browser!
+>    DeepSeek menerapkan verifikasi captcha interaktif dan OTP email saat login pertama. Playwright membuka jendela browser visual (`headless=False`) untuk menangkap sesi awal secara aman.
+> 2. **Headless Linux VPS:**
+>    Menjalankan `deepseek-bridge login` di VPS tanpa X11/Wayland akan menghasilkan error `cannot open display`.
+> 3. **Solusi Portabilitas:**
+>    Lakukan login satu kali di PC/laptop lokal Anda, lalu salin berkas `data/session/<nama>/session.json` ke direktori yang sama di VPS. Bridge di VPS akan langsung aktif menggunakan `curl_cffi` tanpa memerlukan display grafis.
 
 ---
 
-## 🛡️ Arsitektur Sesi 24/7 & Protokol Login Aman (Safe Login Protocol)
+## 🛡️ Arsitektur Sesi 24/7 & Protokol Autentikasi
 
-DeepSeek Bridge Portable dirancang agar akun DeepSeek yang terhubung diperlakukan **persis seperti manusia yang menggunakan browser fisik sehari-hari**, memastikan keamanan akun maksimal dan uptime operasional 24/7 tanpa putus.
+DeepSeek Bridge Portable dirancang untuk menjaga kestabilan sesi jangka panjang (*uptime* 24/7) dengan perilaku koneksi yang konsisten dengan klien web standar:
 
 ```mermaid
 flowchart TD
-    subgraph AuthLayer["1. Safe Login Protocol (Manual 1x)"]
-        A[deepseek-bridge login] --> B[Launch Persistent Chromium Profile]
-        B --> C[Stealth Bot Neutralizer: Hide webdriver, mock plugins & chrome]
-        C --> D[Single-Hit Navigation ke chat.deepseek.com]
-        D --> E[Buka Tab Baru: Proton Mail OTP di Jendela yang Sama]
-        E --> F[Scoping Ketat: Hanya tangkap token & cookie .deepseek.com]
-        F --> G[Injeksi Success Banner Hijau ke DOM & Safe Teardown]
+    subgraph AuthLayer["1. Inisialisasi Sesi Aman (1x Setup)"]
+        A[deepseek-bridge login / Dashboard] --> B[Buka Profil Chromium Persisten]
+        B --> C[Navigasi Tunggal ke chat.deepseek.com]
+        C --> D[Verifikasi OTP Webmail di Tab Browser yang Sama]
+        D --> E[Isolasi Ketat: Simpan Token & Cookie .deepseek.com]
+        E --> F[Sesi Tersimpan di data/session/<nama>/session.json]
     end
 
     subgraph RuntimeLayer["2. Tri-Tier Self-Healing Keepalive (24/7 Uptime)"]
-        H[Server Running :8787] --> I[Tier 1: Lightweight Heartbeat tiap 15m]
-        I -->|HTTP 200 Probe| J[Update Cookie & Timestamp via curl-cffi]
-        
-        I --> K{Cek Umur Token JWT exp}
-        K -->|Sisa Umur < 4 Jam| L[Tier 2: Proactive Headless Token Renewal]
-        L -->|Headless Profile Context| M[Tangkap JWT Baru dari localStorage]
-        
-        I --> N{Respons Upstream Error?}
-        N -->|Code 40003 / INVALID_TOKEN| O[Tier 3: Reactive Self-Healing Recovery]
-        N -->|Status 202 / AWS WAF Challenge| O
-        O -->|Auto Headless Refresh| M
-        M --> P[Sesi Pulih Otomatis Tanpa Server Restart]
+        G[Server Aktif :8787] --> H[Tier 1: HTTP Heartbeat tiap 15 Menit]
+        H -->|HTTP 200 Probe| I[Sinkronisasi Cookie & Timestamp via curl_cffi]
+
+        H --> J{Cek Masa Berlaku Token}
+        J -->|Sisa Umur < 4 Jam| K[Tier 2: Proactive Headless Renewal]
+        K -->|Headless Profile Context| L[Perbarui Token Sesi Secara Otomatis]
+
+        H --> M{Respons Upstream Error?}
+        M -->|INVALID_TOKEN / Challenge| N[Tier 3: Reactive Recovery & Isolasi Terukur]
+        N -->|Auto Headless Refresh| L
+        L --> O[Layanan Pulih Tanpa Restart Server]
     end
 ```
 
 ### 1. Persistent Chromium Profile (Satu Akun, Satu Sandbox)
-Setiap akun DeepSeek memiliki direktori profil Chromium mandiri di `data/session/<nama>/profile`.
-- Cookie jar, Web Storage, IndexedDB, dan Device ID tersimpan persisten di disk host.
-- Browser tidak pernah login dari nol di setiap sesi: sesi login DeepSeek bertahan berbulan-bulan (30–90 hari) sebagaimana browser harian Anda.
+Setiap akun memiliki direktori profil terpisah di `data/session/<nama>/profile`:
+- Cookie jar, Web Storage, IndexedDB, dan Device ID tersimpan persisten di disk lokal.
+- Penguncian profil lama (*stale lock*) dibersihkan secara aman sebelum browser dibuka kembali.
 
-### 2. Protokol Login Anti-Banned & Co-Existence Webmail
-- **Anti-Burst Single-Hit:** DeepSeek sangat sensitif terhadap percobaan login berulang dalam waktu singkat (*burst login*). Bridge menavigasikan browser tepat 1 kali dan memantau status autentikasi secara pasif tanpa reload beruntun.
-- **Proton Mail / Webmail Co-Existence:** Jika Anda menggunakan Proton Mail, **buka tab baru di jendela browser yang sama** untuk menyalin kode OTP. Membuka Proton Mail di browser/perangkat berbeda dapat memicu deteksi anomali IP/fingerprint Proton yang menyebabkan akun di-blacklist. Bridge memfilter URL dan cookie secara ketat: data Proton Mail tidak akan pernah tersentuh atau mencemari sesi DeepSeek.
-- **Stealth Initialization Injected:** Sebelum halaman DeepSeek dimuat, script stealth otomatis menutupi `navigator.webdriver`, memalsukan `window.chrome`, `navigator.plugins`, dan `navigator.languages` agar tidak memicu proteksi Cloudflare Turnstile maupun AWS WAF.
-- **Visual In-DOM Confirmation:** Setelah token `userToken` (JWT) tertangkap, banner hijau disuntikkan langsung ke tab DeepSeek. Jendela browser dibiarkan aktif agar Anda dapat memverifikasi akun sebelum menekan `[ENTER]` di terminal.
+### 2. Protokol Penangkapan Sesi Bersih & Co-Existence Webmail
+- **Single-Hit Navigation:** Browser menavigasi halaman login tepat satu kali dan memantau ketersediaan token secara pasif tanpa *reload* berulang.
+- **Webmail Co-Existence:** Bila menggunakan webmail (seperti Proton Mail) untuk mengambil kode OTP, buka tab baru di jendela browser yang sama. Bridge membatasi pembacaan hanya pada origin `.deepseek.com` sehingga data tab lain tidak pernah tersentuh.
+- **Zero DOM Clutter:** Penangkapan sesi dilakukan langsung dari konteks penyimpanan browser tanpa menyuntikkan elemen pop-up tambahan ke halaman.
 
-### 3. Tri-Tier Self-Healing Keepalive Engine (Uptime 24/7)
-Server memelihara sesi secara otomatis di latar belakang:
-1. **Tier 1 (Lightweight Heartbeat - tiap 15 menit):** Probe HTTP non-intrusif memanggil `/api/v0/users/current` menggunakan `curl-cffi` (`impersonate="chrome150"`) dengan header identitas yang sama persis seperti jalur completion. Cookies diperbarui dan timestamp sesi disinkronkan tanpa membebani RAM/CPU.
-2. **Tier 2 (Proactive Headless Renewal):** Untuk token JWT, dekoder internal membaca klaim `exp` dan memperbarui token bila sisa umurnya kurang dari **4 jam**. Untuk token opaque non-JWT yang tidak membawa `exp`, bridge memakai kadens tetap **4 jam** berdasarkan `token_issued_at`. Keduanya menjalankan refresh headless di latar belakang menggunakan profil Chromium akun sebelum token lama diputus server.
-3. **Tier 3 (Reactive Self-Healing Fallback):** Jika hulu mengembalikan error `INVALID_TOKEN` (40003) atau AWS WAF Challenge (status 202), bridge seketika membuang token mati dan memperbarui sesi secara otonom via headless context tanpa menghentikan server atau merepotkan pengguna.
-
-**Header Fidelity (XHR, bukan navigasi):** Sejak 2.8.0 seluruh request API memakai set header hasil tangkapan CDP `Network.requestWillBeSentExtraInfo` dari `chat.deepseek.com`: `sec-ch-ua` Chrome 150, `sec-ch-ua-platform: "Windows"`, `sec-fetch-dest: empty`, `sec-fetch-mode: cors`, `sec-fetch-site: same-origin`, `accept-language`, dan `priority`. Header navigasi bawaan curl_cffi (`Sec-Fetch-User`, `Upgrade-Insecure-Requests`, `Sec-Fetch-Dest: document`) dimatikan lewat `default_headers=False` karena memanggil API dengan header navigasi adalah sinyal bot. `x-app-version` dihapus karena bundle web tidak mengirimnya, dan `x-device-id` kini UUIDv4 sesuai regex klien.
-
-### 4. Arsitektur Zero-Coldstart & Matriks Ketahanan Sistem
-Untuk mengeliminasi latensi coldstart pada setiap turn dan menjamin kestabilan kelas produksi:
-- **Multi-Turn KV-Cache Pinning:** Alih-alih membuat chat baru di hulu setiap request, thread continuity mendeteksi sidik percakapan (`tail_marker`, `tool_marker`) dan menyematkan request lanjutan ke `chat_session_id` yang sama. Server DeepSeek hanya memproses delta turn baru (menghemat komputasi self-attention hulu), memangkas TTFT dari ~8 detik menjadi sub-detik (<800ms).
-- **Asynchronous PoW Prewarmer:** Engine `PowPrewarmer` menjaga 2–3 solusi Proof-of-Work Wasm terpecahkan di latar belakang. Saat turn baru masuk, header challenge langsung ditarik dari antrean memori tanpa hambatan komputasi CPU sinkron.
-- **Reentrant RLock Architecture:** Seluruh mekanisme pool, registry disk caching, dan HTTP client menggunakan `threading.RLock()` reentrant murni, mencegah *thread deadlock* saat reload dinamis berlangsung.
-- **Lapisan Penanganan Error Berlapis:**
-  * **Manajemen Akun:** Validasi format JSON, pencegahan duplikasi nama akun (HTTP 409), serta isolasi traversal direktori.
-  * **Parser Prompt Multimodal:** Toleran terhadap format Pydantic model, dictionary mentah, scalar, maupun multimodal text blocks tanpa memicu `AttributeError`.
-  * **Hermes Handler:** Toleran terhadap kegagalan baca `SOUL.md` (encoding/permission), auto-fallback ke persona Xenonite bawaan jika file tidak tersedia.
-  * **Koneksi Hulu DeepSeek:** Penanganan otomatis HTTP 429 (menghormati header `Retry-After`), Cloudflare 500-524 transient retries, AWS WAF challenge mitigation, dan failover otomatis antar-akun bila batas beban tercapai.
+### 3. Tri-Tier Keepalive & Ketahanan Concurrency
+1. **Tier 1 (Lightweight Heartbeat — tiap 15 menit):** Memeriksa kesehatan sesi via `/api/v0/users/current` menggunakan `curl_cffi` (`impersonate="chrome150"`) dengan set header XHR yang konsisten (`sec-ch-ua`, `sec-fetch-mode: cors`, `sec-fetch-site: same-origin`, `default_headers=False`).
+2. **Tier 2 (Proactive Headless Renewal):** Memperbarui sesi secara *headless* di latar belakang sebelum masa berlaku token berakhir (< 4 jam) hanya ketika tidak ada request aktif pada akun tersebut.
+3. **Tier 3 (Isolasi Error Terukur & Session-Aware Pool):**
+   - `LoginRequired` mengisolasi akun selama **180 detik** untuk mencegah kegagalan berulang, sedangkan *exception* sementara hanya memicu pendinginan singkat (`COOLDOWN_SECONDS = 5s`).
+   - Antrean akuisisi akun (`FAILOVER_ACQUIRE_TIMEOUT = 60.0s`) menunggu akun pemilik *thread* secara sabar untuk mengakomodasi proses *reasoning* yang panjang tanpa memutus kontinuitas sesi.
 
 ---
 
 ## 🖥️ Audit Diagnostik Pre-Flight
 
-Bridge dilengkapi auditor bawaan yang memeriksa kesiapan sistem operasi sebelum server dijalankan:
+Jalankan `deepseek-bridge check` untuk memverifikasi kesiapan seluruh dependensi sebelum menjalankan server:
 
 ```text
 ================================================================================
@@ -148,68 +189,29 @@ Bridge dilengkapi auditor bawaan yang memeriksa kesiapan sistem operasi sebelum 
 ================================================================================
 
 [1] RUNTIME & BINARY DEPENDENCIES:
-    ├─ [OK] Python v3.12.2 (64-bit)
-    ├─ [OK] Node.js v22.23.4 (9router WebIDL & zstd compatible)
-    ├─ [OK] PoW Engine (Wasmtime)          : wasmtime vready
-    ├─ [OK] TLS Fingerprint (curl-cffi)    : curl_cffi v0.16.3
+    ├─ [OK] Python v3.12+ (64-bit)
+    ├─ [OK] Node.js v22+ (Kompatibilitas 9router Gateway)
+    ├─ [OK] PoW Engine (Wasmtime)          : wasmtime ready
+    ├─ [OK] TLS Fingerprint (curl_cffi)    : curl_cffi >= 0.17.0 (chrome150 ready)
     ├─ [OK] Browser Engine (Playwright)    : Driver terpasang
     └─ [OK] Port 8787 TERSEDIA             : Siap digunakan
 
 [2] 9ROUTER GATEWAY STATUS:
-    └─ [OK] Online (2.3s) — Model 'dsk/dsk-auto, dsk/dsk' aktif di 9router
+    └─ [OK] Online — Model 'dsk/dsk-auto, dsk/dsk' aktif di 9router
 
 [3] HERMES DYNAMIC PROFILES:
-    ├─ Hermes Root Detected: C:\Users\HP\AppData\Local\hermes
-    ├─ Terdeteksi 4 Profil Dinamis:
-    │   • default            : SOUL.md (663b)  | Model: dsk/dsk-auto
-    │   • mr-robot           : SOUL.md (663b)  | Model: dsk/dsk-auto
-    │   • elliot-alderson    : SOUL.md (663b)  | Model: dsk/dsk-auto
-    │   • darlene-alderson   : SOUL.md (663b)  | Model: dsk/dsk-auto
+    ├─ Hermes Root Detected: %LOCALAPPDATA%\hermes (atau ~/.hermes)
+    ├─ Terdeteksi Profil Dinamis (default, mr-robot, elliot-alderson, dll.)
     └─ Status: Terintegrasi Modular
 
 [4] DEEPSEEK ACCOUNT POOL:
-    └─ [CLEAN SLATE] Siap digunakan untuk round-robin pooling.
+    └─ Status akun & validitas session.json terverifikasi.
 ================================================================================
 ```
 
 ---
 
-## 🚀 Quickstart (3 Langkah)
-
-### 1. Inisialisasi Otomatis (1-Click)
-```bash
-git clone https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable.git
-cd deepseek-bridge-portable
-
-# Di Windows:
-.\bootstrap.bat
-
-# Di Linux / macOS:
-chmod +x bootstrap.sh && ./bootstrap.sh
-```
-
-### 2. Jalankan Pre-Flight Auditor
-```bash
-deepseek-bridge check
-```
-
-### 3. Sinkronisasi 9router & Hermes
-```bash
-# Injeksi bridge ke 9router Gateway
-deepseek-bridge connect xenonite
-
-# Injeksi konfigurasi global Hermes (890k context window)
-deepseek-bridge setup-hermes
-
-# Mulai berdialog dengan agen Hermes pilihanmu!
-hermes -p mr-robot chat
-```
-
----
-
 ## 🎛️ Referensi Lengkap Perintah CLI
-
-DeepSeek Bridge Portable menyediakan CLI terpadu yang 100% interoperabel dengan format modular:
 
 ```text
 deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
@@ -219,8 +221,8 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 | Perintah | Alias | Deskripsi |
 | :--- | :--- | :--- |
 | `deepseek-bridge serve` | — | Menjalankan server gateway OpenAI-compatible di port 8787 (mendukung `--reload`) |
-| `deepseek-bridge dashboard` | `ui`, `gui` | Membuka Web Dashboard GUI di browser default (otomatis menyalakan server jika belum aktif) |
-| `deepseek-bridge check` | — | Menjalankan audit diagnosa menyeluruh (Python, Node, Wasmtime, curl-cffi, Playwright, Port, 9router, Hermes) |
+| `deepseek-bridge dashboard` | `ui`, `gui` | Membuka Web Dashboard GUI di browser default |
+| `deepseek-bridge check` | — | Menjalankan audit diagnosa menyeluruh (Python, Wasmtime, `curl_cffi`, Playwright, Port, 9router, Hermes) |
 | `deepseek-bridge init` | — | Inisialisasi struktur folder data lokal (`data/session`, `data/state`) dan browser engine |
 | `deepseek-bridge status` | — | Memeriksa ringkasan status akun terdaftar dan validitas sesi di disk |
 
@@ -228,7 +230,7 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 | Perintah | Alias | Deskripsi & Contoh |
 | :--- | :--- | :--- |
 | `deepseek-bridge login [nama]` | — | Membuka jendela browser interaktif untuk login manual OTP/Captcha (`deepseek-bridge login acc1`) |
-| `deepseek-bridge browse [nama]` | `open` | Membuka browser visual interaktif profil akun untuk verifikasi atau inspeksi manual |
+| `deepseek-bridge browse [nama]` | `open` | Membuka browser visual profil akun untuk verifikasi atau inspeksi manual |
 
 ### 3. Manajemen Pool Akun (`accounts`)
 | Perintah | Deskripsi & Parameter |
@@ -244,14 +246,14 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 | `deepseek-bridge keys create <nama>` | Membuat API key baru (`deepseek-bridge keys create agen1 --rpm 60 --gap 1.0 --conc 2`) |
 | `deepseek-bridge keys del <target>` | Menghapus API key berdasarkan nama atau token |
 | `deepseek-bridge keys enable <target>` | Mengaktifkan kembali API key yang dinonaktifkan |
-| `deepseek-bridge keys disable <target>`| Menonaktifkan API key seketika tanpa menghapusnya |
+| `deepseek-bridge keys disable <target>` | Menonaktifkan API key seketika tanpa menghapusnya |
 
 ### 5. Manajemen Model Wire (`models`)
 | Perintah | Deskripsi & Parameter |
 | :--- | :--- |
 | `deepseek-bridge models list` | Menampilkan model terdaftar, target internal wire (`default`/`expert`), dan status publikasi |
 | `deepseek-bridge models add <nama>` | Menambahkan alias model baru (`deepseek-bridge models add dsk-coder --target expert --publish`) |
-| `deepseek-bridge models edit` | Menu interaktif visual (navigasi panah terminal) untuk mengubah nama, target, dan publikasi model |
+| `deepseek-bridge models edit` | Menu interaktif visual untuk mengubah nama, target, dan publikasi model |
 | `deepseek-bridge models publish <n>` | Mempublikasikan model ke endpoint `/v1/models` agar dikenali otomatis oleh 9router |
 | `deepseek-bridge models unpublish <n>` | Menarik model dari endpoint `/v1/models` (tetap aktif sebagai alias internal) |
 | `deepseek-bridge models del <nama>` | Menghapus alias model dari registry |
@@ -260,22 +262,22 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 | Perintah | Alias | Deskripsi & Opsi |
 | :--- | :--- | :--- |
 | `deepseek-bridge log` | `logs` | Memantau riwayat request telemetry dari SQLite (`--limit 50`, `--json`) |
-| `deepseek-bridge log -f` | `logs -f` | Mode real-time tailing live request yang sedang diproses bridge |
+| `deepseek-bridge log -f` | `logs -f` | Mode *real-time tailing* request yang sedang diproses bridge |
 | `deepseek-bridge log --status error` | — | Memfilter log request berdasarkan status (`ok`, `throttled`, `error`) atau sesi (`--session`) |
 
 ### 7. Integrasi Ekosistem & Testing
 | Perintah | Deskripsi & Parameter |
 | :--- | :--- |
-| `deepseek-bridge connect [key_name]` | Otomatis menginjeksi node provider dan koneksi bridge ke 9router Gateway (`:20128`) |
+| `deepseek-bridge connect [key_name]` | Menginjeksi node provider dan koneksi bridge ke 9router Gateway (`:20128`) dengan pilihan API Key interaktif |
 | `deepseek-bridge setup-hermes` | Mengonfigurasi global config Hermes (`~/.hermes/config.json`) ke `dsk/dsk-auto` (890k context) |
-| `deepseek-bridge test [prompt]` | Mengirim live streaming chat completion untuk menguji latensi (TTFT) dan respons bridge |
+| `deepseek-bridge test [prompt]` | Mengirim *live streaming chat completion* untuk menguji latensi dan respons bridge |
 
 ### 8. Sistem Pembaruan & Versioning (`update`, `version`)
 | Perintah | Alias | Deskripsi & Parameter |
 | :--- | :--- | :--- |
 | `deepseek-bridge version` | — | Menampilkan versi rilis, hash commit Git aktif, branch, dan status sinkronisasi remote |
-| `deepseek-bridge update` | `upgrade` | Memeriksa pembaruan dari GitHub, menampilkan visual changelog, dan menerapkan update secara instan |
-| `deepseek-bridge update --check` | — | Hanya memeriksa pembaruan dan menampilkan daftar changelog tanpa melakukan update kode |
+| `deepseek-bridge update` | `upgrade` | Memeriksa pembaruan dari GitHub, menampilkan changelog, dan menerapkan update |
+| `deepseek-bridge update --check` | — | Memeriksa pembaruan dan menampilkan changelog tanpa mengubah kode lokal |
 | `deepseek-bridge update -y` | — | Menerapkan pembaruan secara otomatis tanpa prompt konfirmasi terminal |
 
 ---
@@ -284,41 +286,37 @@ deepseek-bridge <subcommand> [aksi] [argumen] [opsi]
 
 > [!NOTE]
 > ### 💙 Penghormatan untuk Tim DeepSeek
-> **DeepSeek adalah penyedia AI Open-Source sejati (bukan sekadar open-weight), dan itulah keunggulan paling monumental serta hadiah terbesar mereka bagi peradaban teknologi dunia.**
-> Keberanian dan komitmen mereka merilis arsitektur model, kode, dan bobot secara terbuka penuh (*truly open-source*) dengan performa frontier kelas dunia telah mendemokratisasi akses kecerdasan buatan, meruntuhkan hegemoni korporasi tertutup, dan membuka gerbang inovasi bagi jutaan developer di seluruh dunia. Kami menaruh rasa hormat, apresiasi, dan terima kasih yang setinggi-tingginya kepada seluruh peneliti dan insinyur di DeepSeek.
+> **DeepSeek adalah pelopor ekosistem AI *open-source* yang mendorong keterbukaan arsitektur, bobot model, dan riset kelas frontier bagi komunitas global.**
+> Komitmen mereka telah membuka akses kecerdasan buatan tingkat lanjut bagi mahasiswa, peneliti independen, dan developer di seluruh dunia. Kami menaruh apresiasi setinggi-tingginya kepada seluruh tim peneliti dan insinyur di DeepSeek.
 
 ### 🎯 Mengapa Proyek Ini Diciptakan?
-Proyek ini lahir murni sebagai inisiatif jembatan bagi para **mahasiswa, peneliti independen, developer pemula, dan pembelajar mandiri** yang memiliki keterbatasan finansial dan sumber daya komputasi. Tujuannya adalah agar rekan-rekan pembelajar tetap dapat merasakan kehebatan arsitektur agen otonom tingkat lanjut (seperti ekosistem Nous Hermes) menggunakan model frontier tanpa terhalang tembok biaya API komersial.
+Proyek ini dibuat sebagai jembatan riset dan pembelajaran lokal bagi **mahasiswa, peneliti independen, developer pemula, dan pembelajar mandiri** agar dapat mengeksplorasi integrasi agen otonom (seperti Hermes Agent) secara terstruktur di lingkungan lokal.
 
-### ⚖️ Panduan Etika: Jangan Berlebihan & Jangan Serakah
-Agar ekosistem ini tetap sehat dan dapat dinikmati bersama, kami menyerukan prinsip tanggung jawab bersama:
-1. **Gunakan dengan Wajar:** Jangan melakukan *request flooding*, *bot scraping* masif, atau menjalankan puluhan instans paralel yang tidak perlu sehingga membebani infrastruktur server publik DeepSeek.
-2. **Cukup 1–2 Akun:** Gunakan pool secara wajar untuk kebutuhan riset, pair-programming personal, dan belajar mandiri.
-3. **Dukung DeepSeek saat Anda Mampu:** Jika aplikasi atau riset Anda kelak telah menghasilkan keuntungan finansial atau digunakan secara komersial, **berlanggananlah dan belilah API token resmi langsung dari DeepSeek**. Itu adalah wujud apresiasi nyata untuk keberlangsungan inovasi mereka.
-
-*Teruslah bereksplorasi, kembangkan keahlian rekayasa Anda, dan tebarkan manfaat bagi sesama pembelajar. Salam hangat untuk seluruh komunitas pengembang agen mandiri!*
+### ⚖️ Panduan Etika Penggunaan
+1. **Gunakan Secara Wajar:** Hindari *request flooding*, *scraping* otomatis berlebih, atau paralelisme masif yang membebani infrastruktur layanan publik.
+2. **Skala Personal (1–2 Akun):** Gunakan pool akun secukupnya untuk kebutuhan riset, pengembangan personal, dan pembelajaran.
+3. **Dukung DeepSeek Secara Resmi:** Apabila proyek atau alur kerja Anda telah memasuki tahap komersial atau produksi berskala besar, gunakanlah API resmi DeepSeek sebagai bentuk dukungan berkelanjutan terhadap inovasi mereka.
 
 ---
 
 ## 🤝 Komunitas, Kontribusi & Kolaborasi Open Source
 
-Proyek ini dibangun secara independen dan **terbuka lebar untuk kolaborasi pengembang global**. Jika Anda menemukan celah perbaikan, bug hulu, atau ingin menambahkan kapabilitas baru:
+Proyek ini dikembangkan secara terbuka dan menerima kontribusi dari komunitas pengembang:
 
-### Saluran Komunikasi & Kolaborasi:
-- 💡 **Diskusi Ide & Arsitektur:** Buka [GitHub Discussions](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/discussions).
-- 🐛 **Pelaporan Masalah / Bug:** Buka [GitHub Issues](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/issues) menggunakan formulir terstruktur kami.
-- 📬 **Kontak Author:** Hubungi via email di **`inirizqullahakbar@gmail.com`**.
-- 🛠️ **Panduan Kontribusi:** Baca [CONTRIBUTING.md](CONTRIBUTING.md) untuk pedoman branching dan pengujian PR.
+- 💡 **Diskusi Ide & Arsitektur:** [GitHub Discussions](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/discussions)
+- 🐛 **Pelaporan Masalah / Bug:** [GitHub Issues](https://github.com/Muhammad-Rizqullah-Akbar/deepseek-bridge-portable/issues)
+- 📬 **Kontak Author:** `inirizqullahakbar@gmail.com`
+- 🛠️ **Panduan Kontribusi:** Lihat [CONTRIBUTING.md](CONTRIBUTING.md)
 
-### 🎯 Roadmap & Open Bounties:
-- 🐳 **Docker + Xvfb Virtual Framebuffer:** Kontainerisasi agar penangkapan sesi browser visual dapat dijalankan langsung di VPS tanpa display fisik.
-- 🧩 **Multi-Agent Adapters:** Integrasi langsung ke Claude Code, AutoGen, CrewAI, dan LangChain.
-- 📊 **Telemetry Dashboard UI:** Peningkatan grafik visualisasi penggunaan token real-time dan monitoring latensi request di web dashboard.
+### 🎯 Roadmap Pengembangan
+- 🐳 **Docker + Xvfb Support:** Kontainerisasi agar proses inisialisasi sesi browser dapat dijalankan di lingkungan Linux server.
+- 🧩 **Multi-Agent Adapters:** Dukungan tambahan untuk adapter agen seperti Claude Code, AutoGen, CrewAI, dan LangChain.
+- 📊 **Telemetry Dashboard UI:** Peningkatan visualisasi metrik token dan latensi secara *real-time* di dashboard web.
 
 ---
 
 ## 📜 Lisensi & Penafian Hukum
 
-Didistribusikan di bawah lisensi resmi **MIT License**. Hak Cipta (c) 2026 **inirizqullahakbar & Kontributor**. Lihat file [LICENSE](LICENSE) untuk informasi lengkap.
+Didistribusikan di bawah lisensi **MIT License**. Hak Cipta (c) 2026 **Muhammad-Rizqullah-Akbar & Kontributor**. Lihat berkas [LICENSE](LICENSE) untuk rincian lengkap.
 
-> **Penafian Hukum:** Proyek ini merupakan tools otomasi mandiri untuk tujuan riset rekayasa protokol dan integrasi agen lokal. Proyek ini tidak berafiliasi, didukung, atau dikembangkan oleh DeepSeek Inc. Pengguna bertanggung jawab penuh atas kepatuhan terhadap ketentuan layanan penyedia terkait.
+> **Penafian Hukum:** Proyek ini merupakan perangkat lunak utilitas lokal untuk tujuan riset rekayasa protokol dan integrasi agen AI. Proyek ini tidak berafiliasi dengan atau didukung oleh DeepSeek Inc. Pengguna bertanggung jawab penuh atas kepatuhan terhadap ketentuan layanan penyedia terkait. Dokumentasi ini ditulis dengan bantuan AI (*written by AI*).
