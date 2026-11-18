@@ -8,7 +8,10 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
+import time
+import uuid
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -45,7 +48,15 @@ RATE_LIMIT_PER_MINUTE = int(os.getenv("DSB_RATE_LIMIT", "600"))
 # 2 paralel stabil sukses, 3 ke atas mulai muncul penolakan.
 MAX_CONCURRENT_COMPLETIONS = int(os.getenv("DSB_MAX_CONCURRENT", "2"))
 # Tunggu maksimal untuk mendapatkan slot completion sebelum menolak request.
+# Digunakan sebagai timeout pool.acquire. Jauh di atas 2 detik supaya
+# permintaan yang benar-benar siap tidak ditolak karena race condition.
 COMPLETION_QUEUE_TIMEOUT = float(os.getenv("DSB_QUEUE_TIMEOUT", "120"))
+# Tunggu maksimal untuk percobaan failover sesaat antar akun, detik.
+# Jangan pernah menunggu lama di sini: kalau akun penuh, segera coba akun lain.
+FAILOVER_ACQUIRE_TIMEOUT = float(os.getenv("DSB_FAILOVER_TIMEOUT", "60.0"))
+# Batas global completion bersamaan di seluruh pool (mencegah 2N request
+# burst dari satu IP). Diatur konservatif: 4 sampai 8.
+GLOBAL_MAX_CONCURRENT = int(os.getenv("DSB_GLOBAL_MAX_CONCURRENT", "4"))
 
 # --- Pool Akun -------------------------------------------------------------
 # Daftar akun dipisah titik koma, misalnya:
@@ -60,7 +71,7 @@ ACCOUNT_NAMES = [a.strip() for a in ACCOUNTS_RAW.split(";") if a.strip()]
 # Jeda minimum antar request pada satu akun, detik.
 MIN_GAP_SECONDS = float(os.getenv("DSB_MIN_GAP", "1.0"))
 # Lama pendinginan setelah satu akun kena throttle, detik.
-COOLDOWN_SECONDS = float(os.getenv("DSB_COOLDOWN", "20"))
+COOLDOWN_SECONDS = float(os.getenv("DSB_COOLDOWN", "5"))
 # Lama pendinginan setelah akun kena tantangan keamanan/challenge, detik (default 60s, bukan 1800s).
 CHALLENGE_COOLDOWN_SECONDS = float(os.getenv("DSB_CHALLENGE_COOLDOWN", "60"))
 # Aktifkan mode pool. Kalau False, perilaku sama seperti satu akun biasa.
@@ -70,11 +81,12 @@ POOL_ENABLED = os.getenv("DSB_POOL_ENABLED", "1") == "1"
 def account_paths(name: str) -> tuple[Path, Path]:
     """Kembalikan (session_file, profile_dir) untuk sebuah nama akun.
 
-    Nama "default" dan "acc1" memetakan ke lokasi sesi pertama supaya
+    Nama "default" memetakan ke lokasi sesi pertama supaya
     setup satu akun yang sudah berjalan tidak perlu dipindah. Nama lain
     mendapat direktori sendiri di session/<nama>/.
+    Alias "acc1" dihapus untuk mencegah tabrakan identitas.
     """
-    if name in ("default", "acc1"):
+    if name == "default":
         return SESSION_FILE, PROFILE_DIR
     base = SESSION_BASE / name
     return base / "session.json", base / "profile"
@@ -84,6 +96,107 @@ def account_dir(name: str) -> Path:
     """Direktori kerja satu akun, tempat session.json dan threads.json."""
     session_file, _profile = account_paths(name)
     return session_file.parent
+
+
+def identity_path(name: str) -> Path:
+    """Path ke identity.json untuk satu akun."""
+    return account_dir(name) / "identity.json"
+
+
+def _seed_from_name(name: str) -> int:
+    """Seed deterministik dari nama akun untuk generate identitas stabil."""
+    h = 2166136261
+    for c in name.encode("utf-8"):
+        h ^= c
+        h = (h * 16777619) & 0xFFFFFFFF
+    return h
+
+
+# Pilihan nilai yang terlihat natural untuk fingerprint browser.
+_LOCALES = ["en_US", "id_ID", "en_GB", "en_IN", "en_AU"]
+_TIMEZONES = ["Asia/Jakarta", "Asia/Singapore", "Asia/Kuala_Lumpur",
+              "America/New_York", "Europe/London"]
+_SCREENS = [(1920, 1080), (1366, 768), (1440, 900), (1536, 864), (2560, 1440)]
+_SCALE_FACTORS = [1.0, 1.25, 1.5]
+_BUNDLE_IDS = ["com.deepseek.chat", "com.deepseek.chat.nov"]
+
+
+def generate_identity(name: str) -> dict:
+    """Buat identity seed yang stabil dan natural untuk satu akun.
+
+    Nilai diturunkan dari seed deterministik nama akun, jadi setiap akun
+    dapat identitas browser yang konsisten tapi berbeda dari akun lain.
+    Identitas ini tidak berubah antar request.
+    """
+    seed = _seed_from_name(name)
+    locale = _LOCALES[seed % len(_LOCALES)]
+    tz = _TIMEZONES[(seed >> 8) % len(_TIMEZONES)]
+    w, h = _SCREENS[(seed >> 16) % len(_SCREENS)]
+    scale = _SCALE_FACTORS[(seed >> 24) % len(_SCALE_FACTORS)]
+    bundle = _BUNDLE_IDS[(seed >> 32) % len(_BUNDLE_IDS)]
+
+    tz_offsets = {
+        "Asia/Jakarta": 25200, "Asia/Singapore": 28800,
+        "Asia/Kuala_Lumpur": 28800, "America/New_York": -18000,
+        "Europe/London": 0,
+    }
+    tz_offset = tz_offsets.get(tz, 25200)
+
+    return {
+        "device_id": str(uuid.uuid4()),
+        "locale": locale,
+        "timezone": tz,
+        "timezone_offset": tz_offset,
+        "user_agent": UA_CANONICAL,
+        "sec_ch_ua": SEC_CH_UA,
+        "platform": "Windows",
+        "screen_width": w,
+        "screen_height": h,
+        "device_scale_factor": scale,
+        "client_version": CLIENT_VERSION,
+        "client_bundle_id": bundle,
+        "device_model": "",
+        "created_at": time.time(),
+    }
+
+
+def load_identity(name: str) -> Optional[dict]:
+    """Baca identity.json, atau buat baru kalau belum ada."""
+    path = identity_path(name)
+    if path.exists():
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    ident = generate_identity(name)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(ident, indent=2), encoding="utf-8")
+    return ident
+
+
+def cdp_port_for(name: str) -> int:
+    """Alokasi port CDP deterministik dan bebas tabrakan untuk satu akun.
+
+    Port diturunkan dari seed nama akun, di rentang 9330-9829.
+    Dicek dengan bind sebelum dikembalikan.
+    """
+    seed = _seed_from_name(name)
+    base_port = 9330 + (seed % 500)
+    for offset in range(500):
+        port = base_port + offset
+        if port > 9830:
+            port = 9330 + offset
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(("127.0.0.1", port))
+                return port
+        except OSError:
+            continue
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
 
 # --- Sesi ------------------------------------------------------------------
 # Profil browser persisten. Sekali login manual, profil ini dipakai ulang
@@ -191,6 +304,12 @@ def profile_payload_max_chars(fraction: float = None) -> int:
     return int(token_budget * CHARS_PER_TOKEN)
 # Token dianggap kedaluwarsa setelah sekian detik, lalu di-refresh dari profil.
 SESSION_MAX_AGE = int(os.getenv("DSB_SESSION_MAX_AGE", str(30 * 24 * 60 * 60)))
+# Token DeepSeek yang dipakai web app bukan JWT: 64 karakter base64 opaque tanpa
+# klaim `exp`. Karena TTL-nya tidak bisa dibaca dari token, refresh proaktif
+# memakai kadens tetap. Default 4 jam, di bawah TTL server yang teramati 6 jam,
+# supaya token selalu diperbarui sebelum server memutusnya sendiri.
+OPAQUE_TOKEN_REFRESH_SECONDS = int(
+    os.getenv("DSB_OPAQUE_REFRESH", str(4 * 60 * 60)))
 # Kalau False, server tidak akan membuka window browser saat request masuk;
 # malah mengembalikan 503 berisi instruksi login. Default True supaya
 # pengalaman pertama kali mulus.
@@ -227,20 +346,24 @@ CLIENT_SETTINGS_PATH = "/api/v0/client/settings"
 INDEX_QUERY_PATH = "/api/v0/index/query"
 INDEX_PREPARE_PATH = "/api/v0/index/prepare"
 
-# Target impersonate curl_cffi yang sinkron dengan Chrome sistem (157.x).
-# curl_cffi 0.16.3 tidak punya target chrome160; chrome150 paling dekat
-# dengan versi sistem. Semua permintaan wajib pakai nilai ini agar TLS
-# fingerprint tidak bertabrakan dengan User-Agent session.
-CLIENT_VERSION = "2.7.0"
+# Target impersonate curl_cffi yang sinkron dengan Chrome sistem (150.x).
+# curl_cffi sudah punya target chrome150. Semua permintaan wajib
+# pakai nilai ini agar TLS fingerprint tidak bertabrakan dengan User-Agent.
+CLIENT_VERSION = "2.8.0"
 TLS_IMPERSONATE = "chrome150"
 CURL_IMPERSONATE = os.getenv("DSB_IMPERSONATE", TLS_IMPERSONATE)
 
+# Nilai sec-ch-ua harus persis sama dengan versi Chrome pada TLS_IMPERSONATE.
+# Urutan brand Chrome 150 adalah GREASE, Chromium, Google Chrome.
+SEC_CH_UA = '"Not;A=Brand";v="8", "Chromium";v="150", "Google Chrome";v="150"'
+
 # User-Agent kanonik untuk semua request HTTP bridge. HeadlessChrome
 # dihindari karena WAF DeepSeek menganggapnya sidik otomasi telanjang.
+# Versi UA WAJIB sama dengan target TLS_IMPERSONATE.
 UA_CANONICAL = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/156.0.0.0 Safari/537.36"
+    "Chrome/150.0.0.0 Safari/537.36"
 )
 
 # --- Model -----------------------------------------------------------------
