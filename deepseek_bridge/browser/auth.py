@@ -20,6 +20,7 @@ import logging
 import os
 import sys
 import time
+import uuid
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -79,25 +80,6 @@ _STEALTH_INIT_SCRIPT = """
         get: () => ['en-US', 'en', 'id']
       });
     }
-  } catch(e) {}
-})()
-"""
-
-_INJECT_SUCCESS_BANNER_JS = """
-(() => {
-  try {
-    if (document.getElementById('deepseek-bridge-success-banner')) return;
-    const b = document.createElement('div');
-    b.id = 'deepseek-bridge-success-banner';
-    b.style.cssText = 'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:9999999;' +
-        'background:linear-gradient(135deg,#059669,#10b981);color:#ffffff;padding:14px 28px;' +
-        'border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;' +
-        'font-size:15px;font-weight:600;box-shadow:0 10px 25px rgba(0,0,0,0.35);border:1px solid #34d399;' +
-        'display:flex;align-items:center;gap:12px;';
-    b.innerHTML = '<span style="font-size:22px;">&#10003;</span> ' +
-        '<span>[DeepSeek Bridge] Sesi Berhasil Terhubung &amp; Tersimpan! Jendela ini tetap aktif untuk verifikasi Anda. ' +
-        'Tutup jendela ini jika sudah selesai.</span>';
-    document.body.appendChild(b);
   } catch(e) {}
 })()
 """
@@ -209,6 +191,22 @@ class Session:
     device_id: str = ""
     # Zona waktu klien dalam detik, dikirim website di x-client-timezone-offset.
     timezone_offset: int = 0
+    # Kapan token ini diterbitkan. Berbeda dari captured_at yang di-reset
+    # setiap probe sehat: field ini hanya berubah saat token benar-benar
+    # diganti, sehingga bisa dipakai menghitung usia token opaque yang tidak
+    # membawa klaim exp.
+    token_issued_at: float = 0.0
+    # sec_ch_ua untuk fingerprint konsisten dengan browser login
+    sec_ch_ua: str = ""
+
+    def __post_init__(self) -> None:
+        if not self.token_issued_at:
+            self.token_issued_at = self.captured_at
+        # Bundle web memvalidasi x-device-id sebagai UUIDv4 (regex klien
+        # mensyaratkan digit versi 4). Sesi lama tanpa device id diberi UUIDv4
+        # baru di sini supaya tidak pernah mengirim bentuk yang ditolak.
+        if not self.device_id:
+            self.device_id = str(uuid.uuid4())
 
     @property
     def age(self) -> float:
@@ -229,14 +227,24 @@ class Session:
         except Exception:
             return None
         # Normalisasi UA dari berkas sesi lama yang mungkin menyimpan HeadlessChrome/UA headless.
+# Juga pastikan UA di sesi sama dengan UA kanonik (config.UA_CANONICAL) agar
+# browser login dan HTTP client tidak mengirim versi yang berbeda.
         if not obj.user_agent or "HeadlessChrome" in obj.user_agent \
                 or "headless" in obj.user_agent.lower():
             obj.user_agent = config.UA_CANONICAL
+        elif obj.user_agent != config.UA_CANONICAL:
+            obj.user_agent = config.UA_CANONICAL
+        # Sync sec_ch_ua juga untuk konsistensi fingerprint
+        if not hasattr(obj, 'sec_ch_ua') or not obj.sec_ch_ua:
+            obj.sec_ch_ua = config.SEC_CH_UA
         return obj
 
 
 # Membaca bearer token yang disimpan web app setelah login.
-# Verifikasi ketat: HANYA dievaluasi pada origin deepseek.com dan HANYA menerima format JWT (ey...).
+# Dievaluasi HANYA pada origin deepseek.com. Menerima dua format: JWT (ey...)
+# dan string base64 opaque. Token DeepSeek yang teramati di lapangan adalah
+# base64 64 karakter tanpa titik, bukan JWT. Validator lama mensyaratkan 'ey'
+# sehingga token opaque ditolak dan sesi tidak pernah tertangkap.
 _READ_TOKEN_JS = """
 () => {
   try {
@@ -252,11 +260,38 @@ _READ_TOKEN_JS = """
     } catch {
       token = raw;
     }
-    if (typeof token === 'string' && token.trim().startsWith('ey') && token.trim().length > 20) {
-      return token.trim();
-    }
+    const t = (typeof token === 'string') ? token.trim() : '';
+    if (!t) return null;
+    const isJwt = t.startsWith('ey') && t.length > 40;
+    const isOpaque = /^[A-Za-z0-9+/=_-]{40,}$/.test(t);
+    if (isJwt || isOpaque) return t;
     return null;
   } catch (e) { return null; }
+}
+"""
+
+
+# Membaca device id yang dipakai web app. Website menyimpan UUID di
+# localStorage; kalau kuncinya berganti, nilai UUID dipindai dari seluruh
+# localStorage. Device id yang stabil mencegah server membaca rotasi token
+# sebagai pembajakan sesi. Bundle web memvalidasi UUIDv4 (versi 4).
+_READ_DEVICE_JS = """
+() => {
+  try {
+    if (!window.location.hostname.includes("deepseek.com")) return '';
+    const keys = ['deviceId', 'device_id', 'ds_device_id'];
+    for (const k of keys) {
+      const v = window.localStorage.getItem(k);
+      if (v && v.trim()) return v.trim();
+    }
+    // UUIDv4 regex: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx, y = 8|9|a|b
+    const uuid4 = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const v = window.localStorage.getItem(window.localStorage.key(i));
+      if (v && uuid4.test(v.trim())) return v.trim();
+    }
+    return '';
+  } catch (e) { return ''; }
 }
 """
 
@@ -356,26 +391,32 @@ def _capture_from_context(context, page) -> Optional[Session]:
         }
 
         ua = _safe_evaluate(page, "() => navigator.userAgent") or ""
-        dev_id = _safe_evaluate(
-            page,
-            "() => window.localStorage.getItem('deviceId') || window.localStorage.getItem('device_id') || ''"
-        ) or ""
+        dev_id = _safe_evaluate(page, _READ_DEVICE_JS) or ""
+        sec_ua = _safe_evaluate(page, "() => navigator.userAgentData?.brands?.map(b=>`\"${b.brand}\";v=\"${b.version}\"`).join(', ') || ''") or ""
         # Buang penanda headless. Kalau UA kosong atau mengandung
         # HeadlessChrome, pakai UA kanonik (device_id tetap dipertahankan
-        # sebagai UUID sesi asli dari tab DeepSeek).
+        # sebagai UUID sesi asli dari tab DeepSeek). Selalu gunakan
+        # UA_CANONICAL agar browser login dan HTTP client sama versi.
         if not ua or "HeadlessChrome" in ua or "headless" in ua.lower():
             ua = config.UA_CANONICAL
+        else:
+            ua = config.UA_CANONICAL
+        if not sec_ua:
+            sec_ua = config.SEC_CH_UA
 
         tz_offset = _safe_evaluate(page, "() => new Date().getTimezoneOffset() * -60")
         tz_int = int(tz_offset) if tz_offset is not None else 0
 
+        now = time.time()
         return Session(
             token=token,
             cookies=deepseek_cookies,
             user_agent=ua,
-            captured_at=time.time(),
+            captured_at=now,
             device_id=dev_id,
             timezone_offset=tz_int,
+            token_issued_at=now,
+            sec_ch_ua=sec_ua,
         )
     except Exception:
         return None
@@ -517,11 +558,8 @@ def login(headless: bool = False, assume_logged_out: bool = False,
                 pass
             raise RuntimeError("Login selesai namun token DeepSeek tidak dapat dibaca dari localStorage.")
 
-        # Simpan sesi SEGERA ke disk
+        # Simpan sesi SEGERA ke disk (tanpa injeksi visual banner)
         session.save(session_file)
-
-        # Injeksi visual success banner ke tab DeepSeek
-        _safe_evaluate(target_page, _INJECT_SUCCESS_BANNER_JS)
 
         print("\n" + "=" * 76)
         print(" [SUCCESS] Sesi DeepSeek Berhasil Ditangkap dan Disimpan!")

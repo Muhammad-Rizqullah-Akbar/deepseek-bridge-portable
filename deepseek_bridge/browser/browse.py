@@ -43,7 +43,7 @@ from ..core import config
 from ..state.registry import AccountRegistry
 from .auth import (
     _capture_from_context, Session, _clean_stale_profile_locks, _READ_TOKEN_JS,
-    is_deepseek_tab, _INJECT_SUCCESS_BANNER_JS, _safe_evaluate
+    is_deepseek_tab, _safe_evaluate
 )
 
 
@@ -247,7 +247,11 @@ def run_browse(account_name: str) -> int:
     if digits:
         cdp_port = 9330 + int(digits)
     else:
-        cdp_port = 9330 + (abs(hash(account_name)) % 500) + 1
+        # Gunakan port deterministik dari identity.json, bukan hash acak.
+        try:
+            cdp_port = config.cdp_port_for(account_name)
+        except Exception:
+            cdp_port = 9330 + (abs(hash(account_name)) % 500) + 1
 
     log.info("Membuka browser visual desktop untuk akun '%s'...", account_name)
     log.info("  Binary : %s", browser_exe)
@@ -262,8 +266,28 @@ def run_browse(account_name: str) -> int:
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-blink-features=AutomationControlled",
-        config.CHAT_URL,
     ]
+
+    # Fingerprint per akun dari identity.json. Setiap akun dapat
+    # ukuran layar, bahasa, dan skala yang berbeda tapi stabil.
+    try:
+        ident = config.load_identity(account_name)
+    except Exception:
+        ident = None
+    if ident:
+        lang = (ident.get("locale") or "en_US").replace("_", "-")
+        w = ident.get("screen_width", 1920)
+        h = ident.get("screen_height", 1080)
+        scale = ident.get("device_scale_factor", 1.0)
+        cmd.append(f"--lang={lang}")
+        cmd.append(f"--window-size={w},{h}")
+        cmd.append(f"--force-device-scale-factor={scale}")
+        # Simpan identity untuk CDP override di loop capture.
+        _identity = ident
+    else:
+        _identity = None
+
+    cmd.append(config.CHAT_URL)
 
     try:
         if sys.platform == "win32":
@@ -281,78 +305,109 @@ def run_browse(account_name: str) -> int:
     from playwright.sync_api import sync_playwright
 
     token_captured = False
+    last_saved_token = None
 
     with sync_playwright() as p:
-        browser = None
-        for attempt in range(40):
+            browser = None
+            for attempt in range(40):
+                try:
+                    browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
+                    break
+                except Exception:
+                    if proc.poll() is not None and attempt > 6:
+                        log.info("Browser ditutup sebelum pengawas CDP terhubung.")
+                        return 0
+                    time.sleep(0.5)
+
+            if not browser:
+                log.warning("Pengawas CDP tidak dapat terhubung, browser tetap aktif untuk pengguna.")
+                try:
+                    proc.wait()
+                except Exception:
+                    pass
+                return 0
+
+            log.info("Pengawas sesi CDP terhubung. Silakan login atau selesaikan captcha di browser.")
+
+            # Terapkan fingerprint CDP dari identity.json agar browser
+            # terlihat seperti device yang konsisten per akun.
+            if _identity:
+                try:
+                    cdp = browser.new_cdp_session(browser)
+                    if _identity.get("timezone"):
+                        cdp.send("Emulation.setTimezoneOverride",
+                                 {"timezoneId": _identity["timezone"]})
+                    if _identity.get("locale"):
+                        cdp.send("Emulation.setLocaleOverride",
+                                 {"locale": _identity["locale"]})
+                    if _identity.get("screen_width"):
+                        cdp.send("Emulation.setDeviceMetricsOverride", {
+                            "width": _identity["screen_width"],
+                            "height": _identity["screen_height"],
+                            "deviceScaleFactor": _identity.get("device_scale_factor", 1.0),
+                            "mobile": False,
+                        })
+                    cdp.send("Emulation.setUserAgentOverride", {
+                        "userAgent": config.UA_CANONICAL,
+                        "acceptLanguage": (_identity.get("locale") or "en_US").replace("_", "-"),
+                        "platform": "Windows",
+                    })
+                except Exception as e:
+                    log.debug("CDP fingerprint override dilewati: %s", e)
+
+            last_check = 0.0
             try:
-                browser = p.chromium.connect_over_cdp(f"http://127.0.0.1:{cdp_port}")
-                break
-            except Exception:
-                if proc.poll() is not None and attempt > 6:
-                    log.info("Browser ditutup sebelum pengawas CDP terhubung.")
-                    return 0
-                time.sleep(0.5)
+                while browser.is_connected():
+                    if stop_file.exists():
+                        log.info("Sinyal stop diterima. Menutup browser...")
+                        stop_file.unlink(missing_ok=True)
+                        try:
+                            proc.terminate()
+                        except Exception:
+                            pass
+                        break
 
-        if not browser:
-            log.warning("Pengawas CDP tidak dapat terhubung, browser tetap aktif untuk pengguna.")
-            try:
-                proc.wait()
-            except Exception:
-                pass
-            return 0
+                    now = time.time()
+                    if now - last_check >= 2.0:
+                        last_check = now
+                        try:
+                            contexts = browser.contexts
+                            if contexts:
+                                for ctx in contexts:
+                                    for p_curr in ctx.pages:
+                                        if not is_deepseek_tab(p_curr):
+                                            continue
+                                        s = _capture_from_context(ctx, p_curr)
+                                        if s and s.token:
+                                            # Hanya simpan jika token berubah. Jika sama,
+                                            # token_issued_at dan captured_at lama dipertahankan
+                                            # supaya usia token tidak di-reset tiap 2 detik.
+                                            if s.token != last_saved_token:
+                                                s.save(session_file)
+                                                last_saved_token = s.token
+                                                if not token_captured:
+                                                    log.info("Token & cookies successfully ditangkap dan disimpan ke %s!", session_file.name)
+                                                    token_captured = True
+                                                    try:
+                                                        import urllib.request
+                                                        port = getattr(config, "PORT", 8787)
+                                                        req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/reload", data=b"")
+                                                        urllib.request.urlopen(req, timeout=1.0)
+                                                        log.info("Sinyal reload terkirim ke server bridge (port %s).", port)
+                                                    except Exception:
+                                                        pass
+                                            break
+                        except Exception as loop_err:
+                            log.debug("Pengawas loop CDP toleran terhadap: %s", loop_err)
 
-        log.info("Pengawas sesi CDP terhubung. Silakan login atau selesaikan captcha di browser.")
-
-        last_check = 0.0
-        try:
-            while browser.is_connected():
+                    time.sleep(0.5)
+            finally:
                 if stop_file.exists():
-                    log.info("Sinyal stop diterima. Menutup browser...")
-                    stop_file.unlink(missing_ok=True)
                     try:
                         proc.terminate()
                     except Exception:
                         pass
-                    break
-
-                now = time.time()
-                if now - last_check >= 2.0:
-                    last_check = now
-                    try:
-                        contexts = browser.contexts
-                        if contexts:
-                            for ctx in contexts:
-                                for p_curr in ctx.pages:
-                                    if not is_deepseek_tab(p_curr):
-                                        continue
-                                    s = _capture_from_context(ctx, p_curr)
-                                    if s and s.token:
-                                        s.save(session_file)
-                                        _safe_evaluate(p_curr, _INJECT_SUCCESS_BANNER_JS)
-                                        if not token_captured:
-                                            log.info("Token & cookies berhasil ditangkap dan disimpan ke %s!", session_file.name)
-                                            token_captured = True
-                                            try:
-                                                import urllib.request
-                                                port = getattr(config, "PORT", 8787)
-                                                req = urllib.request.Request(f"http://127.0.0.1:{port}/admin/reload", data=b"")
-                                                urllib.request.urlopen(req, timeout=1.0)
-                                                log.info("Sinyal reload terkirim ke server bridge (port %s).", port)
-                                            except Exception:
-                                                pass
-                                        break
-                    except Exception as loop_err:
-                        log.debug("Pengawas loop CDP toleran terhadap: %s", loop_err)
-
-                time.sleep(0.5)
-        finally:
-            if stop_file.exists():
-                try:
-                    proc.terminate()
-                except Exception:
-                    pass
-            stop_file.unlink(missing_ok=True)
+                stop_file.unlink(missing_ok=True)
 
     log.info("Selesai untuk akun '%s'.", account_name)
     return 0
