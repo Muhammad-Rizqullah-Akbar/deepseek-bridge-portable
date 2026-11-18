@@ -218,16 +218,35 @@ def inject_to_9router(
 def cmd_connect_generate(args=None) -> int:
     """Ambil/buat API Key Bridge Xenonite + Base URL, lalu auto-inject ke 9router."""
     store = get_store()
-    name = getattr(args, "name", None)
-    if not name:
-        name = "xenonite"
-    name = name.strip()
-
+    raw_name = getattr(args, "name", None)
     force_new = getattr(args, "rotate", False) or getattr(args, "force_new", False)
+    key: Optional[ApiKey] = None
+
+    if not raw_name and not force_new and sys.stdin.isatty():
+        enabled_keys = [k for k in store.all() if k.enabled]
+        if enabled_keys:
+            print("\nPilih API Key yang akan di-inject ke 9router:")
+            for idx, k in enumerate(enabled_keys, 1):
+                print(f"  [{idx}] {k.name} ({k.key[:11]}...)")
+            print("  [0] Buat key baru (xenonite)")
+            try:
+                choice = input(f"Pilihan [1-{len(enabled_keys)} / 0, default=1]: ").strip()
+            except EOFError:
+                choice = ""
+            if choice == "0":
+                raw_name = "xenonite"
+                force_new = True
+            elif choice.isdigit() and 1 <= int(choice) <= len(enabled_keys):
+                key = enabled_keys[int(choice) - 1]
+                raw_name = key.name
+            elif choice == "":
+                key = enabled_keys[0]
+                raw_name = key.name
+
+    name = (raw_name or "xenonite").strip()
 
     # Cari key yang sudah ada dengan nama tersebut
-    key: Optional[ApiKey] = None
-    if not force_new:
+    if key is None and not force_new:
         for existing in store.all():
             if existing.name.lower() == name.lower() and existing.enabled:
                 key = existing

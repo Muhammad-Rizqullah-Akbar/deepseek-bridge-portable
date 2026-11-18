@@ -49,7 +49,7 @@ from ..state import cache
 from ..state.registry import Account, AccountError, AccountRegistry
 from ..state.apikeys import ApiKey, get_store
 from ..browser.auth import LoginRequired, Session
-from .client import DeepSeekClient, DeepSeekError, DeepSeekChallengeRequired
+from .client import DeepSeekClient, DeepSeekError, DeepSeekChallengeRequired, DeepSeekSessionTerminated
 from .dashboard import record_request
 from ..state.pool import AccountPool, AccountState
 from .ratelimit import RateLimiter
@@ -118,6 +118,9 @@ _limiter = RateLimiter(limit=config.RATE_LIMIT_PER_MINUTE, window=60.0)
 _completion_gate = threading.BoundedSemaphore(config.MAX_CONCURRENT_COMPLETIONS)
 _account_gates: dict[str, threading.BoundedSemaphore] = {}
 _account_gate_lock = threading.Lock()
+# Pembatas global completion bersamaan di seluruh pool. Mencegah 2N request
+# burst dari satu IP ketika N akun masing-masing 2 paralel. Diatur konservatif.
+_global_gate = threading.BoundedSemaphore(config.GLOBAL_MAX_CONCURRENT)
 
 
 def _gate_for(account_name: Optional[str] = None) -> threading.BoundedSemaphore:
@@ -255,7 +258,8 @@ def get_client_for(account: AccountState) -> DeepSeekClient:
             session = get_session_for(account)
             log.info("sesi akun %s siap, token %s...",
                      account.name, session.token[:10])
-            client = DeepSeekClient(session)
+            client = DeepSeekClient(session, session_file=account.session_file,
+                                    identity=config.load_identity(account.name))
             _clients[account.key] = client
             log.info("klien akun %s siap", account.name)
         return client
@@ -559,7 +563,8 @@ def pool_check():
 
         entry["token_age_minutes"] = round(session.age / 60, 1)
         try:
-            client = DeepSeekClient(session)
+            client = DeepSeekClient(session, session_file=account.session_file,
+                                    identity=config.load_identity(account.name))
             client.create_chat_session()
             entry.update(status="ok")
         except DeepSeekError as e:
@@ -733,7 +738,27 @@ def _extract_jwt_exp(token: str) -> Optional[float]:
     return None
 
 
+_keepalive_lock = threading.Lock()
+
+
 def _keepalive_once(account: str) -> bool:
+    """Serialisasi siklus keepalive supaya dua thread tidak membuka profil yang sama.
+
+    Loop periodik dan endpoint /admin/keepalive/run bisa berjalan bersamaan.
+    Dua headless refresh pada profil yang sama akan berebut lock Chromium dan
+    memutar cookie di tengah stream. Lock non-blocking membuat pemanggil kedua
+    dilewati, bukan menunggu.
+    """
+    if not _keepalive_lock.acquire(blocking=False):
+        log.info("keepalive %s dilewati: siklus keepalive lain sedang berjalan", account)
+        return False
+    try:
+        return _keepalive_once_impl(account)
+    finally:
+        _keepalive_lock.release()
+
+
+def _keepalive_once_impl(account: str) -> bool:
     """Verifikasi dan perpanjang sesi akun secara aman via HTTP heartbeat & proaktif headless renewal."""
     pool = get_pool()
     acc = pool.accounts.get(account)
@@ -741,6 +766,13 @@ def _keepalive_once(account: str) -> bool:
         return False
     if account in _open_windows:
         log.info("keepalive %s dilewati: window profil sedang terbuka", account)
+        return False
+    # Jangan pernah merotasi token saat ada request aktif. Headless refresh
+    # membuka profil yang sama dan dapat memutar cookie sesi di tengah stream,
+    # sehingga token yang sedang dipakai klien dicabut server di tengah jalan.
+    if getattr(acc, "in_flight", 0) > 0:
+        log.info("keepalive %s dilewati: %d request sedang berjalan",
+                 account, acc.in_flight)
         return False
     session = Session.load(acc.session_file)
     if session is None:
@@ -769,10 +801,30 @@ def _keepalive_once(account: str) -> bool:
                 account, max(0.0, remaining_seconds / 3600.0), jittered_before_expiry / 3600.0
             )
             needs_proactive_refresh = True
-    elif (now - session.captured_at) > max(3600.0, config.SESSION_MAX_AGE - jittered_before_expiry):
+    else:
+        # Token DeepSeek bukan JWT: tidak ada klaim exp yang bisa dibaca.
+        # Sebelumnya cabang ini memakai SESSION_MAX_AGE (30 hari) yang tidak
+        # pernah tercapai, sehingga token tidak pernah diperbarui proaktif dan
+        # server memutusnya sendiri di tengah percakapan. Sekarang pakai
+        # kadens tetap yang lebih pendek dari TTL server.
+        opaque_age = now - session.token_issued_at
+        if opaque_age > config.OPAQUE_TOKEN_REFRESH_SECONDS:
+            log.info(
+                "keepalive %s: token opaque berumur %.1f jam (kadens %.1f jam). Memperbarui secara proaktif...",
+                account, opaque_age / 3600.0,
+                config.OPAQUE_TOKEN_REFRESH_SECONDS / 3600.0
+            )
+            needs_proactive_refresh = True
+
+    # 1b. PROACTIVE SESSION ROTATION: Rotasi sesi sebelum force logout server (30-90 hari)
+    # DeepSeek biasanya force logout sesi browser setelah ~30-90 hari.
+    # Kita rotasi di 21 hari (dengan jitter ±3 hari) untuk stay ahead.
+    session_age_days = (now - session.captured_at) / 86400.0
+    rotation_threshold_days = 21 + random.uniform(-3.0, 3.0)  # 18-24 hari
+    if session_age_days > rotation_threshold_days:
         log.info(
-            "keepalive %s: usia sesi mendekati batas maksimum (%d hari). Memperbarui secara proaktif...",
-            account, int(config.SESSION_MAX_AGE / 86400)
+            "keepalive %s: sesi berumur %.1f hari (threshold %.1f hari). Rotasi proaktif untuk hindari force logout...",
+            account, session_age_days, rotation_threshold_days
         )
         needs_proactive_refresh = True
 
@@ -788,76 +840,74 @@ def _keepalive_once(account: str) -> bool:
         except Exception as ref_err:
             log.warning("keepalive %s: refresh proaktif gagal (%s), melanjutkan probe HTTP...", account, ref_err)
 
-    # 2. HTTP PROBE RINGAN (curl_cffi impersonate chrome120)
+    # 2. HTTP PROBE RINGAN dengan identitas yang sama dengan jalur completion.
+    # Probe lama membangun header sendiri yang lebih tipis (tanpa x-device-id,
+    # x-client-timezone-offset, x-client-locale) dan memakai cookie jar
+    # terpisah. Token yang sama tampil dengan dua sidik jari, dan itu pola yang
+    # dibaca server sebagai pembajakan sesi. probe_session() memakai
+    # build_headers() yang sama dengan klien.
     try:
-        from curl_cffi import requests as cffi_requests
-        headers = {
-            "authorization": f"Bearer {session.token}",
-            "accept": "*/*",
-            "user-agent": config.UA_CANONICAL,
-            "origin": config.BASE,
-            "referer": f"{config.BASE}/",
-            "x-app-version": config.CLIENT_VERSION,
-            "x-client-version": config.CLIENT_VERSION,
-            "x-client-platform": "web",
-        }
-        r = cffi_requests.get(
-            config.BASE + config.USERS_CURRENT_PATH,
-            headers=headers,
-            cookies=session.cookies,
-            timeout=10.0,
-            impersonate=config.CURL_IMPERSONATE,
-        )
-        if r.status_code == 200:
-            try:
-                data = r.json()
-            except Exception:
-                data = {}
-            code = data.get("code")
-            if code == 0:
-                session.captured_at = time.time()
-                if r.cookies:
-                    for k, v in r.cookies.items():
-                        session.cookies[k] = v
-                session.save(acc.session_file)
-                _keepalive_last[account] = time.time()
-                log.info("keepalive %s: sesi sehat dan aktif (HTTP 200), timestamp diperbarui", account)
-                return True
-            elif code == 40303 or data.get("msg") == "CHALLENGE_REQUIRED":
-                log.warning("keepalive %s: akun memerlukan verifikasi Captcha (40303)", account)
-                pool.mark_challenge(acc, config.CHALLENGE_COOLDOWN_SECONDS)
-                return False
-            elif code == 40003 or "INVALID_TOKEN" in str(data.get("msg", "")):
-                log.warning("keepalive %s: token kedaluwarsa (40003). Memulihkan via headless refresh...", account)
-                discard_rejected_session(acc)
-                try:
-                    from ..browser.auth import _headless_refresh
-                    new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
-                    if new_s:
-                        _keepalive_last[account] = time.time()
-                        log.info("keepalive %s: sesi berhasil dipulihkan secara otomatis dengan token baru", account)
-                        return True
-                except Exception as ref_err:
-                    log.warning("keepalive %s: pemulihan otomatis gagal (%s)", account, ref_err)
-                return False
-        elif r.status_code == 202 or r.headers.get("x-amzn-waf-action") == "challenge":
-            log.warning("keepalive %s: terhadang AWS WAF challenge. Memperbarui clearance cookie via headless...", account)
-            try:
-                from ..browser.auth import _headless_refresh
-                new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
-                if new_s:
-                    _keepalive_last[account] = time.time()
-                    log.info("keepalive %s: cookie WAF berhasil diperbarui via headless", account)
-                    return True
-            except Exception as ref_err:
-                log.warning("keepalive %s: pembaruan cookie WAF gagal (%s)", account, ref_err)
-            return False
-        else:
-            log.warning("keepalive %s: HTTP probe mengembalikan status %d", account, r.status_code)
-            return False
+        from .client import probe_session
+        res = probe_session(session)
     except Exception as e:
         log.warning("keepalive %s probe gagal: %s", account, e)
         return False
+
+    if not res:
+        log.warning("keepalive %s: probe tidak mengembalikan respons", account)
+        return False
+
+    status = res.get("status")
+    code = res.get("code")
+    msg = res.get("msg") or ""
+
+    if res.get("captcha"):
+        log.warning("keepalive %s: akun memerlukan captcha (405 + x-amzn-waf-action)", account)
+        pool.mark_challenge(acc, config.CHALLENGE_COOLDOWN_SECONDS)
+        return False
+
+    if status == 200 and code == 0:
+        session.captured_at = time.time()
+        session.save(acc.session_file)
+        _keepalive_last[account] = time.time()
+        log.info("keepalive %s: sesi sehat dan aktif (HTTP 200), timestamp diperbarui", account)
+        return True
+
+    if code == 40303 or msg == "CHALLENGE_REQUIRED":
+        log.warning("keepalive %s: akun memerlukan verifikasi Captcha (40303)", account)
+        pool.mark_challenge(acc, config.CHALLENGE_COOLDOWN_SECONDS)
+        return False
+
+    if code == 40003 or "INVALID_TOKEN" in msg:
+        log.warning("keepalive %s: token kedaluwarsa (40003). Memulihkan via headless refresh...", account)
+        discard_rejected_session(acc)
+        try:
+            from ..browser.auth import _headless_refresh
+            new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+            if new_s:
+                _keepalive_last[account] = time.time()
+                log.info("keepalive %s: sesi berhasil dipulihkan secara otomatis dengan token baru", account)
+                return True
+        except Exception as ref_err:
+            log.warning("keepalive %s: pemulihan otomatis gagal (%s)", account, ref_err)
+        return False
+
+    if res.get("waf") or status == 202:
+        log.warning("keepalive %s: terhadang AWS WAF challenge. Memperbarui clearance cookie via headless...", account)
+        try:
+            from ..browser.auth import _headless_refresh
+            new_s = _headless_refresh(profile_dir=acc.profile_dir, session_file=acc.session_file)
+            if new_s:
+                _keepalive_last[account] = time.time()
+                log.info("keepalive %s: cookie WAF berhasil diperbarui via headless", account)
+                return True
+        except Exception as ref_err:
+            log.warning("keepalive %s: pembaruan cookie WAF gagal (%s)", account, ref_err)
+        return False
+
+    log.warning("keepalive %s: HTTP probe mengembalikan status %s (code %s)",
+                account, status, code)
+    return False
 
 
 def _keepalive_loop() -> None:
@@ -1157,8 +1207,12 @@ def admin_accounts():
     reg = get_registry()
     pool = get_pool()
     out = []
+    # Phase 4: session rotation threshold for observability
+    now = time.time()
+    rotation_threshold_days = 21 + random.uniform(-3.0, 3.0)  # 18-24 hari
     for acc in reg.accounts.values():
         session = Session.load(acc.session)
+        session_age_days = (now - session.captured_at) / 86400.0 if session else 0.0
         entry = {
             "name": acc.name,
             "email": acc.email,
@@ -1202,6 +1256,21 @@ def admin_accounts():
             "last_refresh_human": (
                 _human_age(time.time() - _keepalive_last[acc.name])
                 if acc.name in _keepalive_last else None),
+            # Phase 4: observability fields
+            "token_issued_age_seconds": (
+                round(time.time() - session.token_issued_at, 1) if session and session.token_issued_at else None),
+            "token_issued_age_human": (
+                _human_age(time.time() - session.token_issued_at) if session and session.token_issued_at else None),
+            "session_rotation_due_days": (
+                round(rotation_threshold_days - session_age_days, 1) if session else None),
+            "pool_state": (
+                pool.accounts[acc.name].state if acc.name in pool.accounts else "not_in_pool"),
+            "pool_cooldown_remaining": (
+                round(pool.accounts[acc.name].cooldown_until - time.time(), 1)
+                if acc.name in pool.accounts and pool.accounts[acc.name].cooldown_until else None),
+            "pool_challenge_cooldown": (
+                pool.accounts[acc.name].challenge_cooldown if acc.name in pool.accounts else 0),
+            "in_flight_requests": getattr(acc, "in_flight", 0),
         }
         out.append(entry)
     return {
@@ -1219,9 +1288,13 @@ def admin_accounts():
 
 @app.post("/admin/accounts")
 async def admin_account_add(request: Request):
-    """Tambah akun baru. Profil Chromium dibuat otomatis saat login.
+    """ tambah akun baru. Profil Chromium dibuat otomatis saat login.
 
-    Body: {"name": "acc3", "email": "alamat@proton.me"}
+    Body: {"name": "acc3", "email": "alamat@proton.me",
+            "priority": 60, "locale": "id_ID",
+            "timezone": "Asia/Jakarta", "proxy": ""}
+    Field priority, locale, timezone, proxy opsional. Jika tidak diberi,
+    identity.json dienerate otomatis dari seed deterministik nama akun.
     """
     try:
         body = await request.json()
@@ -1244,9 +1317,10 @@ async def admin_account_add(request: Request):
             name=name,
             email=(body.get("email") or "").strip(),
             note=(body.get("note") or "").strip(),
+            priority=int(body.get("priority", 50)),
         )
         reg.add(acc)
-    except AccountError as e:
+    except (AccountError, ValueError, TypeError) as e:
         return _error(str(e), status=400, err_type="account_error")
 
     # Satu akun satu profil Chromium. Direktori profil dibuat sekarang,
@@ -1258,10 +1332,26 @@ async def admin_account_add(request: Request):
         acc.profile.mkdir(parents=True, exist_ok=True)
         created = [str(acc.profile), str(acc.session.parent)]
     except OSError as e:
-        # Akun sudah terdaftar; kegagalan membuat direktori dilaporkan
-        # sebagai peringatan, bukan kegagalan penuh, karena Chromium tetap
-        # bisa membuat profilnya sendiri saat login.
         log.warning("akun %s terdaftar tapi direktori gagal dibuat: %s", name, e)
+
+    # Generate identity.json otomatis dari seed deterministik nama akun.
+    # Field locale, timezone, dan proxy dari body override nilai default.
+    try:
+        ident = config.generate_identity(name)
+        if body.get("locale"):
+            ident["locale"] = body["locale"]
+        if body.get("timezone"):
+            ident["timezone"] = body["timezone"]
+        if body.get("proxy"):
+            ident["proxy"] = body["proxy"]
+        if body.get("fingerprint_seed"):
+            ident["fingerprint_seed"] = body["fingerprint_seed"]
+        ident_path = config.identity_path(name)
+        ident_path.parent.mkdir(parents=True, exist_ok=True)
+        ident_path.write_text(json.dumps(ident, indent=2), encoding="utf-8")
+        created.append(str(ident_path))
+    except Exception as e:
+        log.warning("akun %s: gagal generate identity.json: %s", name, e)
 
     _reset_pool()
     log.info("akun %s ditambahkan (email=%s, profil=%s)",
@@ -1270,9 +1360,11 @@ async def admin_account_add(request: Request):
         "ok": True,
         "account": acc.name,
         "email": acc.email,
+        "priority": acc.priority,
         "profile_dir": acc.profile_dir,
         "profile_ready": acc.profile.exists(),
         "session_file": acc.session_file,
+        "identity_file": str(config.identity_path(name)),
         "created": created,
     }
 
@@ -1289,9 +1381,13 @@ async def admin_account_update(name: str, request: Request):
         return _error("Badan request harus berupa objek JSON.",
                       status=400, err_type="invalid_payload")
     changes = {}
-    for field in ("email", "note"):
+    for field in ("email", "note", "priority"):
         if field in body:
-            changes[field] = body[field]
+            try:
+                changes[field] = int(body[field]) if field == "priority" else body[field]
+            except (ValueError, TypeError):
+                return _error(f"Field '{field}' tidak valid.", status=400,
+                              err_type="invalid_field")
     if not changes:
         return _error("Tidak ada field yang bisa diubah.", status=400,
                       err_type="no_changes")
@@ -1299,19 +1395,80 @@ async def admin_account_update(name: str, request: Request):
         acc = get_registry().update(name, **changes)
     except AccountError as e:
         return _error(str(e), status=400, err_type="account_error")
+
+    # Perbarui identity.json jika locale, timezone, atau proxy diubah.
+    ident_path = config.identity_path(name)
+    if ident_path.exists():
+        try:
+            ident = json.loads(ident_path.read_text(encoding="utf-8"))
+            updated = False
+            for field in ("locale", "timezone", "proxy", "fingerprint_seed"):
+                if field in body:
+                    ident[field] = body[field]
+                    updated = True
+            if updated:
+                ident_path.write_text(json.dumps(ident, indent=2), encoding="utf-8")
+        except Exception:
+            pass
+
     return {"ok": True, "account": asdict(acc)}
 
 
 @app.delete("/admin/accounts/{name}")
-def admin_account_delete(name: str):
-    """Hapus akun dari registry. Berkas di disk tidak disentuh."""
-    try:
-        get_registry().remove(name)
-    except AccountError as e:
-        return _error(str(e), status=404, err_type="account_error")
+async def admin_account_delete(name: str, purge: bool = False):
+    """Hapus akun dari registry. Dengan purge=true, hapus semua berkas di disk.
+
+    Tanpa purge, registry hanya menghapus entri. Berkas profil, session,
+    identity, dan thread tetap ada di disk. Kalau akun dengan nama sama
+    ditambahkan lagi, ia mewarisi identitas lama, melanggar prinsip
+    satu akun satu identitas baru.
+    """
+    import shutil
+    reg = get_registry()
+    acc = reg.get(name)
+    if acc is None:
+        return _error(f"Akun '{name}' tidak ditemukan.", status=404,
+                      err_type="account_not_found")
+    removed_files = []
+    if purge:
+        for path_attr in ("profile", "session", "session.parent"):
+            try:
+                p = getattr(acc, path_attr) if path_attr != "session.parent" else acc.session.parent
+                p = Path(p)
+                if p.exists():
+                    if p.is_dir():
+                        shutil.rmtree(p, ignore_errors=True)
+                    else:
+                        p.unlink(missing_ok=True)
+                    removed_files.append(str(p))
+            except Exception:
+                pass
+        # Hapus identity.json
+        try:
+            ident_path = config.identity_path(name)
+            if ident_path.exists():
+                ident_path.unlink()
+                removed_files.append(str(ident_path))
+        except Exception:
+            pass
+        # Hapus thread file
+        try:
+            thread_path = config.account_dir(name) / "threads.json"
+            if thread_path.exists():
+                thread_path.unlink()
+                removed_files.append(str(thread_path))
+        except Exception:
+            pass
+    reg.remove(name)
     _reset_pool()
-    log.info("akun %s dihapus dari registry", name)
-    return {"ok": True, "removed": name}
+    log.info("akun %s dihapus dari registry (purge=%s, files=%s)",
+             name, purge, len(removed_files))
+    return {
+        "ok": True,
+        "removed": name,
+        "purge": purge,
+        "deleted_files": removed_files,
+    }
 
 
 # ---------------------------------------------------------------- profil hidup
@@ -1538,18 +1695,48 @@ def _clear_mute_state(account: str) -> None:
 @app.get("/healthz")
 def healthz():
     """Status server beserta umur sesi yang sedang dipakai."""
-    age = None
+    pool = get_pool()
     cached = Session.load()
-    if cached:
-        age = round(cached.age, 1)
+    session_age = round(cached.age, 1) if cached else None
     return {
         "status": "ok",
-        "session_age_seconds": age,
+        "session_age_seconds": session_age,
         "session_max_age_seconds": config.SESSION_MAX_AGE,
         "rate_limit_per_minute": config.RATE_LIMIT_PER_MINUTE,
         "accounts": config.ACCOUNT_NAMES,
         "max_concurrent_per_account": config.MAX_CONCURRENT_COMPLETIONS,
+        "pool": {
+            "enabled": config.POOL_ENABLED,
+            "total_accounts": len(pool.accounts) if pool else 0,
+            "available": len([a for a in pool.accounts.values() if a.state == "available"]) if pool else 0,
+            "cooling": len([a for a in pool.accounts.values() if a.state == "cooling"]) if pool else 0,
+            "challenged": len([a for a in pool.accounts.values() if a.state == "challenged"]) if pool else 0,
+            "muted": len([a for a in pool.accounts.values() if a.state == "muted"]) if pool else 0,
+        },
+        "uptime_seconds": round(time.time() - getattr(healthz, "_start_time", time.time()), 1),
     }
+
+
+# Set start time on module load
+healthz._start_time = time.time()
+
+
+@app.get("/v1/health")
+def openai_health():
+    """OpenAI-compatible health check endpoint."""
+    return {"status": "ok", "timestamp": time.time()}
+
+
+@app.get("/ready")
+def readiness():
+    """Kubernetes-style readiness probe - checks if pool has available accounts."""
+    pool = get_pool()
+    if not pool:
+        return JSONResponse({"ready": False, "reason": "pool not initialized"}, status_code=503)
+    available = [a for a in pool.accounts.values() if a.state == "available"]
+    if not available:
+        return JSONResponse({"ready": False, "reason": "no available accounts", "total_accounts": len(pool.accounts)}, status_code=503)
+    return {"ready": True, "available_accounts": len(available), "total_accounts": len(pool.accounts)}
 
 
 # --- admin: pengelolaan API key ------------------------------------------
@@ -1565,6 +1752,7 @@ def admin_list_keys():
         out.append({
             "name": k.name,
             "key": k.key[:11] + "..." if len(k.key) > 14 else k.key,
+            "full_key": k.key,
             "rpm": k.rpm,
             # Jeda minimum antar request beserta laju yang benar-benar
             # bisa dicapai. Tanpa dua angka ini dashboard hanya
@@ -2442,6 +2630,8 @@ async def _run_completion(req: ChatCompletionRequest,
     # dipakai key ini. Thread yang sudah berjalan dipin ke akun pemiliknya:
     # chat session DeepSeek terikat ke akun, memindahkannya berarti
     # konteks hilang dan percakapan harus dimulai ulang.
+    # Cek dulu apakah global pool sudah penuh. Jangan pernah membiarkan request
+    # menunggu 120 detik di akun yang sudah penuh; kembalikan 503 cepat.
     pool = get_pool()
     allowed = api_key.accounts if api_key else None
     profil = (profile_slot[0] if profile_slot else _active_profile[0]) or ""
@@ -2483,8 +2673,8 @@ async def _run_completion(req: ChatCompletionRequest,
                  int((plan.rec or {}).get("turns", 0)) + 1,
                  len(prompt), plan.legacy_chars)
     account = await run_in_threadpool(
-        pool.acquire, config.COMPLETION_QUEUE_TIMEOUT,
-        plan.only or allowed)
+        pool.acquire, config.FAILOVER_ACQUIRE_TIMEOUT,
+        plan.only or allowed, plan.thread_key)
     if account is None and plan.only:
         # Akun pemilik thread sedang pendinginan atau sibuk.
         # Jangan tahan pengguna di akun ini; alihkan percakapan ke akun lain di pool.
@@ -2493,7 +2683,7 @@ async def _run_completion(req: ChatCompletionRequest,
         if plan.store and plan.thread_key:
             plan.store.drop(plan.thread_key)
         account = await run_in_threadpool(
-            pool.acquire, config.COMPLETION_QUEUE_TIMEOUT,
+            pool.acquire, config.FAILOVER_ACQUIRE_TIMEOUT,
             allowed)
         if account is not None:
             use_prompt = _build_fresh_bootstrap_prompt(req, profil)
@@ -2520,10 +2710,14 @@ async def _run_completion(req: ChatCompletionRequest,
         try:
             client = await run_in_threadpool(get_client_for, account)
             break
-        except (LoginRequired, Exception) as e:
-            log.warning("gagal inisialisasi sesi akun %s (%s), failover ke akun pool lain...", account.name, e)
+        except LoginRequired as e:
+            log.warning("akun %s perlu login ulang (%s), isolasi 180s & failover ke akun pool lain...", account.name, e)
             pool.mark_throttled(account, 180.0)
-            account = await run_in_threadpool(pool.acquire, 2.0, allowed)
+            account = await run_in_threadpool(pool.acquire, config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
+        except Exception as e:
+            log.warning("gagal inisialisasi sesi sementara akun %s (%s), cooldown %ds & failover...", account.name, e, int(config.COOLDOWN_SECONDS))
+            pool.mark_throttled(account, config.COOLDOWN_SECONDS)
+            account = await run_in_threadpool(pool.acquire, config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
 
     if account is None or client is None:
         return _error(
@@ -2543,11 +2737,11 @@ async def _run_completion(req: ChatCompletionRequest,
 
         def gen():
             nonlocal client, account
-            account.acquire_in_flight()
+            account.acquire_in_flight(session_key=plan.thread_key)
             # acquire di thread worker, bukan di event loop, agar tidak blok.
             acquired = _acquire_slot(account.name)
             if not acquired:
-                account.release_in_flight()
+                account.release_in_flight(session_key=plan.thread_key)
                 yield _sse_error("Antrian DeepSeek penuh, coba lagi sebentar.")
                 return
             use_prompt = prompt
@@ -2757,6 +2951,7 @@ async def _run_completion(req: ChatCompletionRequest,
                     except DeepSeekError as e:
                         is_challenge = getattr(e, "biz_code", None) == 40303 or isinstance(e, DeepSeekChallengeRequired)
                         is_waf = "AWS WAF" in str(e)
+                        is_terminated = isinstance(e, DeepSeekSessionTerminated)
                         if e.is_muted:
                             pool.mark_muted(account, e.mute_until)
                         elif e.is_invalid_token:
@@ -2766,17 +2961,25 @@ async def _run_completion(req: ChatCompletionRequest,
                             pool.mark_challenge(account, config.CHALLENGE_COOLDOWN_SECONDS)
                             if plan.store and plan.thread_key:
                                 plan.store.drop(plan.thread_key)
+                        elif is_terminated:
+                            log.warning("akun %s: SESI DIPUTUS PAKSA oleh server (%s). Akun dihapus dari pool aktif, butuh login manual baru.", account.name, e.biz_msg)
+                            pool.mark_muted(account, None)  # permanent cooldown
+                            if plan.store and plan.thread_key:
+                                plan.store.drop(plan.thread_key)
                         elif is_waf:
-                            log.warning("akun %s: terhadang AWS WAF challenge sementara, pendinginan cepat %ds", account.name, int(config.COOLDOWN_SECONDS))
+                            log.warning("akun %s:ihadang AWS WAF challenge sementara, pendinginan cepat %ds", account.name, int(config.COOLDOWN_SECONDS))
                             pool.mark_throttled(account, config.COOLDOWN_SECONDS)
                         else:
                             reset_client(account)
                         log.warning("akun %s: stream error (%s)", account.name, e)
                         if account_attempts < max_account_attempts:
-                            next_acc = pool.acquire(2.5, allowed)
+                            next_acc = pool.acquire(config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
                             if next_acc is not None and next_acc.name != account.name:
                                 log.info("stream: failover otomatis (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
                                 yield ": keepalive-account-failover\n\n"
+                                # Drop thread dari akun lama sebelum pindah.
+                                if plan.store and plan.thread_key:
+                                    plan.store.drop(plan.thread_key)
                                 _release_slot(account.name)
                                 account = next_acc
                                 _acquire_slot(account.name)
@@ -2789,29 +2992,24 @@ async def _run_completion(req: ChatCompletionRequest,
                                 continue
                         from ..cognitive import resurgence
                         disp_name = resurgence.get_display_name(profil)
-                        action = resurgence.get_default_starting_action(profil)
-                        fb_text = (
-                            f"Transmisi data hulu mengalami latensi ({str(e)[:80]}). "
-                            f"{disp_name} mengamankan state percakapan dan siap melanjutkan eksekusi teknis untuk {action}."
+                        # Jangan pernah menyamar sebagai jawaban DeepSeek.
+                        # Kembalikan error OpenAI 502 yang jujur.
+                        return _error(
+                            f"Kanal transmisi hulu mengalami latensi ({str(e)[:80]}). "
+                            f"State percakapan {disp_name} diamankan dan siap melanjutkan eksekusi teknis.",
+                            status=502, err_type="upstream_error",
                         )
-                        fb_clean = resurgence.evaluate_and_sanitize_final_output(fb_text, profil)
-                        yield gen_frame({"content": fb_clean})
-                        fb_usage = {
-                            "prompt_tokens": cur_prompt_tokens,
-                            "completion_tokens": max(1, _est_tokens(fb_clean)),
-                            "total_tokens": cur_prompt_tokens + max(1, _est_tokens(fb_clean)),
-                        }
-                        yield gen_frame({}, finish="stop", extra={"usage": fb_usage})
-                        yield "data: [DONE]\n\n"
-                        return
                     except Exception as e:
                         reset_client(account)
                         log.exception("stream DeepSeek exception pada akun %s", account.name)
                         if account_attempts < max_account_attempts:
-                            next_acc = pool.acquire(2.5, allowed)
+                            next_acc = pool.acquire(config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
                             if next_acc is not None and next_acc.name != account.name:
                                 log.info("stream: failover otomatis exception (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
                                 yield ": keepalive-account-failover\n\n"
+                                # Drop thread dari akun lama sebelum pindah.
+                                if plan.store and plan.thread_key:
+                                    plan.store.drop(plan.thread_key)
                                 _release_slot(account.name)
                                 account = next_acc
                                 _acquire_slot(account.name)
@@ -2824,24 +3022,16 @@ async def _run_completion(req: ChatCompletionRequest,
                                 continue
                         from ..cognitive import resurgence
                         disp_name = resurgence.get_display_name(profil)
-                        action = resurgence.get_default_starting_action(profil)
-                        fb_text = (
+                        # Jangan pernah menyamar sebagai jawaban DeepSeek.
+                        # Kembalikan error OpenAI 502 yang jujur.
+                        return _error(
                             f"Kanal transmisi hulu mengalami interupsi: {str(e)[:80]}. "
-                            f"State percakapan {disp_name} diamankan dan siap diproses kembali."
+                            f"State percakapan {disp_name} diamankan dan siap diproses kembali.",
+                            status=502, err_type="upstream_error",
                         )
-                        fb_clean = resurgence.evaluate_and_sanitize_final_output(fb_text, profil)
-                        yield gen_frame({"content": fb_clean})
-                        fb_usage = {
-                            "prompt_tokens": cur_prompt_tokens,
-                            "completion_tokens": max(1, _est_tokens(fb_clean)),
-                            "total_tokens": cur_prompt_tokens + max(1, _est_tokens(fb_clean)),
-                        }
-                        yield gen_frame({}, finish="stop", extra={"usage": fb_usage})
-                        yield "data: [DONE]\n\n"
-                        return
             finally:
                 _release_slot(account.name)
-                account.release_in_flight()
+                account.release_in_flight(session_key=plan.thread_key)
 
         return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -2853,11 +3043,11 @@ async def _run_completion(req: ChatCompletionRequest,
         inc_tokens = max(1, len(plan.prompt) // 4)
         cached_tokens = max(0, prompt_tokens - inc_tokens)
 
-    account.acquire_in_flight()
+    account.acquire_in_flight(session_key=plan.thread_key)
     # acquire di thread worker; memblokir event loop akan menggantung server.
     acquired = await run_in_threadpool(_acquire_slot, account.name)
     if not acquired:
-        account.release_in_flight()
+        account.release_in_flight(session_key=plan.thread_key)
         return _error(
             f"Antrian DeepSeek penuh ({config.MAX_CONCURRENT_COMPLETIONS} "
             "completion bersamaan). Coba lagi sebentar.",
@@ -2960,7 +3150,7 @@ async def _run_completion(req: ChatCompletionRequest,
             log.warning("akun %s: terhadang AWS WAF challenge sementara, pendinginan cepat %ds", account.name, int(config.COOLDOWN_SECONDS))
             pool.mark_throttled(account, config.COOLDOWN_SECONDS)
         reset_client(account)
-        next_acc = pool.acquire(2.5, allowed)
+        next_acc = pool.acquire(config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
         if next_acc is not None and next_acc.name != account.name:
             log.info("non-stream: failover otomatis (geser akun) dari akun %s ke akun %s", account.name, next_acc.name)
             _release_slot(account.name)
@@ -2993,7 +3183,7 @@ async def _run_completion(req: ChatCompletionRequest,
     except Exception as e:
         log.exception("request DeepSeek gagal pada akun %s", account.name)
         reset_client(account)
-        next_acc = pool.acquire(0.2, allowed)
+        next_acc = pool.acquire(config.FAILOVER_ACQUIRE_TIMEOUT, allowed)
         if next_acc is not None and next_acc.name != account.name:
             log.info("non-stream: failover otomatis exception dari akun %s ke akun %s", account.name, next_acc.name)
             _release_slot(account.name)
@@ -3013,19 +3203,16 @@ async def _run_completion(req: ChatCompletionRequest,
             reply = None
 
         if reply is None:
-            from ..cognitive import resurgence
-            disp_name = resurgence.get_display_name(profil)
-            action = resurgence.get_default_starting_action(profil)
-            fb_text = (
+            # Jangan pernah menyamar sebagai jawaban DeepSeek.
+            # Kembalikan error OpenAI 502 yang jujur.
+            return _error(
                 f"Transmisi data hulu terinterupsi: {str(e)[:80]}. "
-                f"State percakapan {disp_name} tetap terlindungi dan siap diproses."
+                f"State percakapan {disp_name} tetap terlindungi dan siap diproses.",
+                status=502, err_type="upstream_error",
             )
-            fb_clean = resurgence.evaluate_and_sanitize_final_output(fb_text, profil)
-            return completion_response(req.model, fb_clean, prompt, None,
-                                       prompt_tokens=prompt_tokens, cached_tokens=cached_tokens)
     finally:
         _release_slot(account.name)
-        account.release_in_flight()
+        account.release_in_flight(session_key=plan.thread_key)
 
     if _is_throttled(reply.text):
         pool.report(account, throttled=True)
@@ -3473,13 +3660,23 @@ def _is_throttled(text: str) -> bool:
 
 
 def _acquire_slot(account_name: Optional[str] = None) -> bool:
-    """Ambil slot completion per akun dengan batas waktu, tanpa memblokir event loop."""
+    """Ambil slot completion global dan per akun dengan batas waktu, tanpa memblokir event loop."""
+    # Global gate dulu: cegah 2N request burst dari satu IP.
+    global_deadline = time.monotonic() + config.FAILOVER_ACQUIRE_TIMEOUT
+    while True:
+        if _global_gate.acquire(blocking=False):
+            break
+        if time.monotonic() >= global_deadline:
+            return False
+        time.sleep(0.02)
+    # Lalu gate per akun.
     gate = _gate_for(account_name)
     deadline = time.monotonic() + config.COMPLETION_QUEUE_TIMEOUT
     while True:
         if gate.acquire(blocking=False):
             return True
         if time.monotonic() >= deadline:
+            _global_gate.release()
             return False
         time.sleep(0.05)
 
@@ -3489,6 +3686,10 @@ def _release_slot(account_name: Optional[str] = None) -> None:
     gate = _gate_for(account_name)
     try:
         gate.release()
+    except ValueError:
+        pass
+    try:
+        _global_gate.release()
     except ValueError:
         pass
 

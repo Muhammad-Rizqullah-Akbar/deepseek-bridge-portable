@@ -342,6 +342,28 @@ function routingPill(rt) {
 
 function isi(id, html) { document.getElementById(id).innerHTML = html; }
 
+async function salinKey(btn, key) {
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(key);
+    } else {
+      const ta = document.createElement('textarea');
+      ta.value = key;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+    const orig = btn.textContent;
+    btn.textContent = 'Tersalin!';
+    setTimeout(() => { btn.textContent = orig; }, 1500);
+  } catch (e) {
+    console.error('Gagal menyalin key:', e);
+  }
+}
+
 // Buat API key baru. RPM dan jeda dikirim terpisah supaya laju nyata
 // bisa dihitung dari jeda, bukan hanya dari plafon per menit.
 async function buatKey() {
@@ -633,7 +655,7 @@ async function load() {
       <th>Akun</th><th>Status</th></tr></thead><tbody>
       ${keys.keys.map(k => `<tr>
         <td><b>${esc(k.name)}</b></td>
-        <td><code>${esc(k.key)}</code></td>
+        <td><code>${esc(k.key)}</code> <button class="btn ghost" style="padding:2px 8px;font-size:11px;margin-left:4px" onclick="salinKey(this, ${esc(JSON.stringify(k.full_key || k.key))})">Salin</button></td>
         <td class="num">${k.rpm === 0 ? '∞' : k.rpm}</td>
         <td class="num">${k.min_gap_s ? k.min_gap_s + 's' : '-'}</td>
         <td class="num">${k.rpm_effective === 0 ? '∞' : k.rpm_effective}</td>
