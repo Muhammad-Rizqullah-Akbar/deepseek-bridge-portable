@@ -22,6 +22,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Iterator, List, Optional
 
 from curl_cffi import requests as cffi_requests
@@ -39,6 +40,136 @@ URL_POW_CHALLENGE = config.BASE + config.POW_CHALLENGE_PATH
 URL_COMPLETION = config.BASE + config.COMPLETION_PATH
 
 _CID_SEP = ":"
+
+
+def _device_id_for(session: Session) -> str:
+    """Device id stabil untuk satu sesi.
+
+    Website mengirim UUID di x-device-id. Kalau berkas sesi sudah punya nilai,
+    itu dipakai. Kalau tidak, UUIDv4 baru dibuat sekali dan disimpan di sesi
+    supaya stabil antar request. UUID acak tiap request sengaja dihindari
+    karena device id yang berubah justru lebih mudah dikenali daripada device
+    id yang tidak dikirim.
+    """
+    if session.device_id:
+        return session.device_id
+    # Bundle web memvalidasi device id sebagai UUIDv4. uuid5 deterministik
+    # menghasilkan digit versi 5 dan ditolak regex klien, jadi pakai v4 dan
+    # simpan di sesi supaya stabil antar request.
+    session.device_id = str(uuid.uuid4())
+    return session.device_id
+
+
+def _tz_offset_for(session: Session) -> int:
+    """Selisih zona waktu dalam detik, sama seperti website."""
+    if session.timezone_offset:
+        return int(session.timezone_offset)
+    return int(-time.timezone if not time.daylight else -time.altzone)
+
+
+def build_headers(session: Session, identity: Optional[dict] = None) -> dict:
+    """Header kanonik untuk satu sesi.
+
+    Satu fungsi untuk klien dan probe keepalive. Kalau dua jalur membangun
+    header sendiri-sendiri, token yang sama akan tampil dengan dua sidik jari
+    berbeda, dan server membacanya sebagai pembajakan sesi.
+    Header diturunkan dari identity.json (jika ada) agar setiap akun
+    memiliki fingerprint HTTP yang konsisten dan berbeda dari akun lain.
+    """
+    if identity is None:
+        identity = {}
+
+    ua = identity.get("user_agent") or session.user_agent or config.UA_CANONICAL
+    sec_ua = identity.get("sec_ch_ua") or getattr(session, 'sec_ch_ua', None) or config.SEC_CH_UA
+    locale = identity.get("locale") or "en_US"
+    bundle = identity.get("client_bundle_id") or "com.deepseek.chat"
+    platform = identity.get("platform") or "Windows"
+    tz_offset = identity.get("timezone_offset")
+    if tz_offset is None:
+        tz_offset = _tz_offset_for(session)
+    dev_id = identity.get("device_id") or _device_id_for(session)
+
+    accept_lang = f"{locale},en;q=0.9"
+
+    return {
+        # Urutan dan nilai mengikuti request XHR nyata dari chat.deepseek.com
+        # yang ditangkap via CDP Network.requestWillBeSentExtraInfo. Header
+        # navigasi bawaan curl_cffi (Sec-Fetch-User, Upgrade-Insecure-Requests,
+        # Sec-Fetch-Dest: document) sengaja tidak dipakai: memanggil API dengan
+        # header navigasi adalah sinyal bot yang jelas.
+        "accept": "*/*",
+        "accept-encoding": "gzip, deflate, br, zstd",
+        "accept-language": accept_lang,
+        "authorization": f"Bearer {session.token}",
+        "origin": config.BASE,
+        "priority": "u=1, i",
+        "referer": f"{config.BASE}/",
+        "sec-ch-ua": sec_ua,
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": f'"{platform}"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "same-origin",
+        "user-agent": ua,
+        "x-client-version": config.CLIENT_VERSION,
+        "x-client-platform": "web",
+        "x-client-locale": locale,
+        "x-client-bundle-id": bundle,
+        "x-device-id": dev_id,
+        "x-client-timezone-offset": str(tz_offset),
+        "x-device-model": "",
+    }
+
+
+def probe_session(session: Session) -> Optional[dict]:
+    """Heartbeat ringan memakai identitas HTTP yang sama dengan klien.
+
+    Tidak membangun DeepSeekClient penuh: konstruktor itu memuat modul WASM
+    PoW dan menyalakan prewarmer, biaya yang tidak perlu untuk satu GET.
+    Yang penting hanya header, cookie, dan target TLS yang identik dengan
+    jalur completion.
+    """
+    http = cffi_requests.Session(
+        headers=build_headers(session),
+        cookies=session.cookies,
+        timeout=(10.0, 15.0),
+        impersonate=config.CURL_IMPERSONATE,
+        default_headers=False,
+    )
+    try:
+        r = http.get(config.BASE + config.USERS_CURRENT_PATH, timeout=10.0)
+        code = None
+        msg = ""
+        try:
+            data = r.json()
+            code = data.get("code")
+            msg = data.get("msg") or ""
+        except Exception:
+            pass
+        # Cookie hasil probe disalin balik supaya jar di disk ikut mutakhir.
+        try:
+            jar = dict(http.cookies.get_dict())
+        except Exception:
+            jar = {}
+        if jar:
+            session.cookies.update(jar)
+        return {
+            "status": r.status_code,
+            "code": code,
+            "msg": msg,
+            "waf": (r.status_code == 202
+                    or r.headers.get("x-amzn-waf-action") == "challenge"),
+            # Bundle web memetakan 405 + x-amzn-waf-action: captcha sebagai
+            # captcha, bukan challenge biasa. Captcha tidak bisa diselesaikan
+            # headless, jadi harus dibedakan supaya tidak terjadi loop refresh.
+            "captcha": (r.status_code == 405
+                        and r.headers.get("x-amzn-waf-action") == "captcha"),
+        }
+    finally:
+        try:
+            http.close()
+        except Exception:
+            pass
 
 
 def _encode_cid(session_id: str, message_id: Optional[int]) -> str:
@@ -98,6 +229,14 @@ COMPLETION_ERROR_CODES = {
     25: "PARENT_MESSAGE_IS_LOCKED",
     26: "INVALID_PARENT_MESSAGE_ID_OR_MESSAGE_NOT_EXIST",
     28: "REF_FILE_AUDIT_UNSATISFIED",
+    # Force logout / session terminated codes
+    40003: "INVALID_TOKEN",
+    40004: "TOKEN_EXPIRED",
+    40005: "SESSION_EXPIRED",
+    40006: "TOKEN_REVOKED",
+    40007: "ACCOUNT_LOCKED",
+    40008: "SESSION_TERMINATED",
+    40009: "FORCE_LOGOUT",
 }
 
 # Kode error global, juga dari bundle.
@@ -220,6 +359,24 @@ class DeepSeekChallengeRequired(DeepSeekError):
         self.challenge_data = challenge_data or {}
 
 
+class DeepSeekSessionTerminated(DeepSeekError):
+    """Sesi DeepSeek diputus paksa oleh server (force logout, token revoked, account locked).
+
+    Ini BUKAN transient — akun ini tidak bisa dipakai lagi sampai login manual baru.
+    """
+
+    FORCE_LOGOUT_CODES = {40003, 40004, 40005, 40006, 40007, 40008, 40009}
+
+    def __init__(self, message: str, biz_code: int, biz_msg: str):
+        super().__init__(message, biz_code=biz_code, biz_msg=biz_msg, transient=False)
+        self.terminal = True
+
+    @classmethod
+    def from_biz_code(cls, biz_code: int, biz_msg: str, data: dict):
+        name = COMPLETION_ERROR_CODES.get(biz_code) or GLOBAL_ERROR_CODES.get(biz_code) or "UNKNOWN_SESSION_ERROR"
+        return cls(f"Sesi DeepSeek berakhir paksa [{name}]: {biz_msg}", biz_code=biz_code, biz_msg=biz_msg)
+
+
 def _biz(data: dict) -> dict:
     """Buka envelope `data.biz_data`, raise bila ada error level API.
 
@@ -262,6 +419,9 @@ def _biz(data: dict) -> dict:
                 "Akun DeepSeek di-mute dan tidak bisa dipakai untuk inference.",
                 biz_code=biz_code, biz_msg=biz_msg, mute_until=mute_until,
             )
+        # Deteksi force logout / session terminated
+        if biz_code in DeepSeekSessionTerminated.FORCE_LOGOUT_CODES:
+            raise DeepSeekSessionTerminated.from_biz_code(biz_code, biz_msg, data)
         name = describe_biz_code(biz_code)
         suffix = f" [{name}]" if name else ""
         raise DeepSeekError(
@@ -345,8 +505,18 @@ class PowPrewarmer:
 class DeepSeekClient:
     """Satu klien berbagi satu sesi signed-in."""
 
-    def __init__(self, session: Optional[Session] = None, allow_interactive: bool = True):
+    def __init__(self, session: Optional[Session] = None,
+                 allow_interactive: bool = True,
+                 session_file: Optional[Path] = None,
+                 identity: Optional[dict] = None):
         self.session = session or get_session(allow_interactive=allow_interactive)
+        # Path berkas sesi milik akun ini. Dipakai saat menyinkronkan cookie
+        # kembali ke disk; tanpa path eksplisit, save() jatuh ke berkas default
+        # dan bisa menimpa sesi akun lain.
+        self._session_file = Path(session_file) if session_file else None
+        # Identity per akun dari identity.json. Dipakai oleh build_headers()
+        # agar fingerprint HTTP konsisten per akun dan berbeda antar akun.
+        self._identity = identity or {}
         self._pow = DeepSeekPow()
         self._pow_lock = threading.Lock()
         self._pow_prewarmer = PowPrewarmer()
@@ -355,51 +525,97 @@ class DeepSeekClient:
             cookies=self.session.cookies,
             timeout=(30.0, 300.0),
             impersonate=config.CURL_IMPERSONATE,
+            default_headers=False,
         )
         self._pow_prewarmer.replenish_async(self)
 
     def _base_headers(self) -> dict:
-        # Versi klien dan device id diambil dari tangkapan Playwright nyata
-        # pada chat.deepseek.com, bukan dikira-kira. Sebelum patch ini bridge
-        # mengirim x-client-version 2.0.0 dan tidak mengirim x-device-id sama
-        # sekali, padahal website mengirim 2.7.0 beserta UUID device. Selisih
-        # itu bisa dipakai pembanding di sisi server.
-        return {
-            "authorization": f"Bearer {self.session.token}",
-            "accept": "*/*",
-            "content-type": "application/json",
-            "user-agent": config.UA_CANONICAL,
-            "origin": config.BASE,
-            "referer": f"{config.BASE}/",
-            "x-app-version": config.CLIENT_VERSION,
-            "x-client-version": config.CLIENT_VERSION,
-            "x-client-platform": "web",
-            "x-client-locale": "en_US",
-            "x-client-bundle-id": "com.deepseek.chat",
-            "x-device-id": self._device_id(),
-            "x-client-timezone-offset": str(self._tz_offset()),
-            "x-device-model": "",
-        }
+        # Delegasi ke build_headers() supaya klien dan probe keepalive memakai
+        # satu sumber header yang sama. Versi klien dan device id diambil dari
+        # tangkapan Playwright nyata pada chat.deepseek.com, bukan dikira-kira.
+        # Identity per akun dari identity.json dipakai agar fingerprint HTTP
+        # konsisten per akun dan berbeda antar akun.
+        return build_headers(self.session, identity=self._identity)
 
     def _device_id(self) -> str:
-        """Device id stabil untuk sesi ini.
-
-        Website mengirim UUID di x-device-id. Kalau berkas sesi sudah punya
-        nilai, itu dipakai. Kalau tidak, nilai diturunkan dari token supaya
-        stabil antar request tanpa perlu menyimpan berkas baru. UUID acak
-        tiap request sengaja dihindari karena device id yang berubah justru
-        lebih mudah dikenali daripada device id yang tidak dikirim.
-        """
-        if self.session.device_id:
-            return self.session.device_id
-        return str(uuid.uuid5(uuid.NAMESPACE_URL,
-                              f"dsb-device:{self.session.token[:32]}"))
+        return _device_id_for(self.session)
 
     def _tz_offset(self) -> int:
-        """Selisih zona waktu dalam detik, sama seperti website."""
-        if self.session.timezone_offset:
-            return int(self.session.timezone_offset)
-        return int(-time.timezone if not time.daylight else -time.altzone)
+        return _tz_offset_for(self.session)
+
+    def _refresh_headers(self) -> None:
+        """Bangun ulang seluruh header dari sesi aktif.
+
+        `_base_headers()` hanya dihitung sekali saat konstruksi. Setelah token
+        atau device id berubah, header lama menjadi kombinasi yang tidak
+        konsisten: token baru dengan device id lama justru pola yang memicu
+        pencabutan sesi. Semua header yang bergantung pada sesi harus dihitung
+        ulang, bukan hanya `authorization`.
+        """
+        self._http.headers.update(self._base_headers())
+
+    def sync_session_cookies(self) -> None:
+        """Salin cookie jar klien kembali ke objek sesi dan simpan ke disk.
+
+        Tanpa ini, jar di memori dan berkas sesi berjalan sendiri-sendiri.
+        Probe keepalive lama memakai jar terpisah dan menulis set cookie yang
+        berbeda ke disk, sehingga klien berikutnya dimuat dengan cookie yang
+        tidak sinkron dengan token.
+        """
+        try:
+            jar = dict(self._http.cookies.get_dict())
+        except Exception:
+            try:
+                jar = {c.name: c.value for c in self._http.cookies.jar}
+            except Exception:
+                jar = {}
+        if jar:
+            self.session.cookies.update(jar)
+        try:
+            if self._session_file is not None:
+                self.session.save(self._session_file)
+            else:
+                self.session.save()
+        except Exception as e:
+            log.debug("gagal menyimpan sesi setelah sinkronisasi cookie: %s", e)
+
+    def probe(self) -> Optional[dict]:
+        """Heartbeat ringan memakai identitas HTTP yang sama dengan klien.
+
+        Keepalive lama memakai `cffi_requests.get` terpisah dengan set header
+        yang dikurangi. Token yang sama dipakai dua sidik jari berbeda, dan itu
+        justru pola yang dibaca server sebagai pembajakan sesi. Probe ini
+        memakai `self._http` supaya token, cookie, dan header tetap satu
+        identitas.
+
+        Kembalian: dict `{status, code, msg, waf}` atau None kalau jaringan
+        gagal.
+        """
+        try:
+            r = self._http.get(
+                config.BASE + config.USERS_CURRENT_PATH,
+                timeout=10.0,
+            )
+        except Exception as e:
+            log.debug("probe jaringan gagal: %s", e)
+            return None
+        code = None
+        msg = ""
+        try:
+            data = r.json()
+            code = data.get("code")
+            msg = data.get("msg") or ""
+        except Exception:
+            pass
+        return {
+            "status": r.status_code,
+            "code": code,
+            "msg": msg,
+            "waf": (r.status_code == 202
+                    or r.headers.get("x-amzn-waf-action") == "challenge"),
+            "captcha": (r.status_code == 405
+                        and r.headers.get("x-amzn-waf-action") == "captcha"),
+        }
 
     # --- langkah protokol ---------------------------------------------------
 
@@ -431,8 +647,23 @@ class DeepSeekClient:
                                     new_sess = _headless_refresh(profile_dir=acc.profile, session_file=acc.session)
                                     if new_sess:
                                         self.session = new_sess
+                                        # Cookie diganti utuh, bukan ditimpa
+                                        # sebagian: cookie WAF lama yang
+                                        # tertinggal membuat sesi baru langsung
+                                        # ditolak pada request berikutnya.
+                                        try:
+                                            self._http.cookies.clear()
+                                        except Exception:
+                                            pass
                                         self._http.cookies.update(new_sess.cookies)
-                                        self._http.headers["authorization"] = f"Bearer {new_sess.token}"
+                                        # Header dihitung ulang seluruhnya.
+                                        # Hanya mengganti authorization
+                                        # meninggalkan x-device-id dan
+                                        # x-client-timezone-offset dari sesi
+                                        # lama. Token baru dengan device id lama
+                                        # adalah pola pembajakan sesi yang
+                                        # memicu pencabutan.
+                                        self._refresh_headers()
                                         log.info("Sesi akun %s berhasil diperbarui dengan token WAF baru", acc.name)
                                         time.sleep(1.0)
                                         continue
@@ -492,11 +723,6 @@ class DeepSeekClient:
         return _biz(data)["chat_session"]["id"]
 
     def _pow_header(self) -> str:
-        cached_hdr = self._pow_prewarmer.pop_valid()
-        if cached_hdr:
-            self._pow_prewarmer.replenish_async(self)
-            return cached_hdr
-
         r = self._http_call_with_retry(
             self._http.post,
             URL_POW_CHALLENGE,
@@ -510,9 +736,7 @@ class DeepSeekClient:
         if not challenge:
             raise DeepSeekError("Respons PoW challenge tidak memuat 'challenge'", transient=True)
         with self._pow_lock:
-            hdr = self._pow.make_header(challenge)
-        self._pow_prewarmer.replenish_async(self)
-        return hdr
+            return self._pow.make_header(challenge)
 
     # --- API publik ---------------------------------------------------------
 
@@ -605,12 +829,19 @@ class DeepSeekClient:
         error completion. Memanggil ini sebelum request berarti akun yang
         dibungkam diketahui lebih dulu, bukan setelah request gagal.
         """
-        r = self._http.get(config.BASE + config.USERS_CURRENT_PATH)
+        r = self._http.get(config.BASE + config.USERS_CURRENT_PATH, timeout=10.0)
         data = _biz(r.json())
         chat = data.get("chat") or {}
+        # Respons nyata memakai `chat.mute` (null saat bersih), sedangkan bundle
+        # lama memetakan `chat.is_muted` + `chat.mute_until`. Kedua bentuk harus
+        # terbaca supaya akun yang dibungkam tidak pernah dilaporkan bersih.
+        mute = chat.get("mute")
+        mute_until = chat.get("mute_until")
+        if isinstance(mute, dict):
+            mute_until = mute.get("mute_until") or mute.get("until") or mute_until
         return {
-            "is_muted": bool(chat.get("is_muted")),
-            "mute_until": chat.get("mute_until"),
+            "is_muted": bool(chat.get("is_muted")) or bool(mute),
+            "mute_until": mute_until,
             "status": data.get("status"),
         }
 
@@ -769,6 +1000,11 @@ class _Stream:
                     else:
                         self._content_parts.append(text)
                     yield kind, text
+                # Sinkronkan cookie jar setelah stream selesai supaya berkas
+                # sesi di disk tidak tertinggal dari jar klien. Tanpa ini,
+                # rotasi aws-waf-token hanya hidup di memori dan hilang saat
+                # klien dibangun ulang.
+                self._client.sync_session_cookies()
         except DeepSeekError:
             raise
         except Exception as e:
